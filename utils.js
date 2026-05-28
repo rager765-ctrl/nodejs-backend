@@ -255,7 +255,8 @@ const KwabzUtils = {
    */
   requireAdmin() {
     if (!KwabzStore.isAdminLoggedIn()) {
-      window.location.href = 'admin-login.html';
+      const inAdminFolder = window.location.pathname.includes('/admin/');
+      window.location.href = inAdminFolder ? 'admin-login.html' : 'admin/admin-login.html';
       return false;
     }
     return true;
@@ -432,7 +433,8 @@ const KwabzUtils = {
     const check = () => {
       if (!KwabzStore.isAdminLoggedIn()) {
         document.documentElement.style.display = 'none';
-        window.location.href = 'admin-login.html';
+        const inAdminFolder = window.location.pathname.includes('/admin/');
+        window.location.href = inAdminFolder ? 'admin-login.html' : 'admin/admin-login.html';
         return false;
       }
       document.documentElement.style.display = '';
@@ -469,8 +471,10 @@ const KwabzUtils = {
       window._adminWatchdogStarted = true;
       setInterval(() => {
         if (!KwabzStore.isAdminLoggedIn()) {
+          const inAdminFolder = window.location.pathname.includes('/admin/');
+          const targetUrl = inAdminFolder ? 'admin-login.html' : 'admin/admin-login.html';
           KwabzUtils.toast('Session expired. Redirecting...', 'error');
-          setTimeout(() => window.location.href = 'admin-login.html', 1500);
+          setTimeout(() => window.location.href = targetUrl, 1500);
         }
       }, 300000); // Check every 5 minutes
     }

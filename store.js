@@ -192,7 +192,8 @@ const KwabzStore = (() => {
             await logout();
             const isAdminPage = window.location.pathname.includes('admin-') || window.location.pathname.includes('sellers.html');
             if (isAdminPage) {
-              window.location.href = 'admin-login.html';
+              const inAdminFolder = window.location.pathname.includes('/admin/');
+              window.location.href = inAdminFolder ? 'admin-login.html' : 'admin/admin-login.html';
             } else {
               window.location.reload();
             }
