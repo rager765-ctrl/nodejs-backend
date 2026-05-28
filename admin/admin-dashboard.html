@@ -1,0 +1,1385 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Admin Dashboard — Kwabz Store</title>
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="icon" type="image/png" href="../favicon.png">
+</head>
+
+<body>
+
+  <!-- ═══ Top App Bar ═══ -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <button class="icon-btn" onclick="document.getElementById('adminDrawer').classList.add('open')">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <span class="top-app-bar__title font-headline">Admin Dashboard</span>
+      <div id="syncStatus"
+        style="font-size:0.55rem;font-weight:900;letter-spacing:0.08em;padding:0.2rem 0.5rem;border-radius:2rem;transition:all 0.3s;display:flex;align-items:center;gap:0.25rem;box-shadow:inset 0 1px 1px rgba(0,0,0,0.05);">
+        <!-- Status injected by JS -->
+      </div>
+      <div id="backendStatus"
+        onclick="window._reconnectBackend && window._reconnectBackend()"
+        title="Click to reconnect server"
+        style="font-size:0.55rem;font-weight:900;letter-spacing:0.08em;padding:0.2rem 0.5rem;border-radius:2rem;transition:all 0.3s;display:flex;align-items:center;gap:0.25rem;box-shadow:inset 0 1px 1px rgba(0,0,0,0.05);margin-left:0.25rem;cursor:pointer;">
+        <!-- Backend Status injected by JS -->
+      </div>
+    </div>
+    <div class="top-app-bar__actions">
+      <button class="icon-btn"
+        onclick="if(window.handleManualRefresh) { window.handleManualRefresh(); } else { KwabzStore.refreshAll(); }"
+        title="Refresh Sync">
+        <span class="material-symbols-outlined">sync</span>
+      </button>
+      <button class="icon-btn" onclick="KwabzStore.adminLogout().then(() => window.location.href='admin-login.html');"
+        title="Logout">
+        <span class="material-symbols-outlined">logout</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══ Side Drawer ═══ -->
+  <div class="modal-overlay" id="adminDrawer" onclick="if(event.target===this) this.classList.remove('open')">
+    <div class="modal-content"
+      style="position:fixed;left:0;top:0;height:100%;width:20rem;max-width:80vw;border-radius:0 var(--radius-xl) var(--radius-xl) 0;transform:translateX(-100%);display:flex;flex-direction:column;padding:2rem;">
+      <div style="margin-bottom:3rem;">
+        <h2 class="font-headline"
+          style="font-weight:900;font-size:1.125rem;letter-spacing:-0.04em;text-transform:uppercase;">Kwabz Store</h2>
+        <p class="text-label-sm" style="color:var(--outline);">Student-Life Commerce</p>
+      </div>
+      <nav style="flex:1;display:flex;flex-direction:column;gap:0.25rem;overflow-y:auto;">
+        <a href="admin-dashboard.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);background:var(--primary);color:var(--on-primary);font-family:var(--font-headline);font-size:0.875rem;font-weight:700;">
+          <span class="material-symbols-outlined">admin_panel_settings</span>
+          Dashboard
+        </a>
+        <a href="admin-widget.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">monitoring</span>
+          Live Widget
+        </a>
+        <a href="admin-products.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">inventory_2</span>
+          Inventory
+        </a>
+        <a href="admin-orders.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">receipt_long</span>
+          Orders
+        </a>
+        <a href="admin-categories.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">category</span>
+          Categories
+        </a>
+        <a href="admin-sellers.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">storefront</span>
+          Sellers
+        </a>
+        <a href="admin-billing.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">payments</span>
+          Billing Sheet
+        </a>
+        <a href="admin-theme.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">palette</span>
+          Live Theme
+        </a>
+        <a href="admin-diagnostics.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">query_stats</span>
+          Business Insights
+        </a>
+        <a href="admin-users.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">group</span>
+          Admin Team
+        </a>
+        <hr style="margin:0.5rem 0; border:none; border-top:1px solid var(--outline-variant);" />
+        <a href="shop.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">person_search</span>
+          Switch to Customer
+        </a>
+      </nav>
+      <div style="display:flex;align-items:center;gap:0.75rem;padding-top:1rem;">
+        <span style="font-weight:700;font-size:0.875rem;">Kwabz Store</span>
+        <span style="font-size:0.625rem;color:var(--outline);">v1.0.0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="page-content page-content--admin">
+
+
+
+    <!-- Stats Grid -->
+    <section style="margin-bottom:3rem;">
+      <h2 class="section-header">Store Overview</h2>
+      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:1rem;">
+        <!-- Products -->
+        <a href="admin-products.html" class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid var(--primary); transition:transform 0.2s; cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+            <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">inventory_2</span>
+          </div>
+          <p id="statProducts" class="stat-card__value" style="font-size:1.75rem;">0</p>
+          <p class="stat-card__label" style="font-size:0.625rem;">PRODUCTS</p>
+        </a>
+        <!-- Categories -->
+        <a href="admin-categories.html" class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+            <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">category</span>
+          </div>
+          <p id="statCategories" class="stat-card__value" style="font-size:1.75rem;">0</p>
+          <p class="stat-card__label" style="font-size:0.625rem;">CATEGORIES</p>
+        </a>
+        <!-- Orders -->
+        <a href="admin-orders.html" class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+            <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">receipt_long</span>
+          </div>
+          <p id="statOrders" class="stat-card__value" style="font-size:1.75rem;">0</p>
+          <p class="stat-card__label" style="font-size:0.625rem;">ORDERS</p>
+        </a>
+        <!-- Sellers -->
+        <a href="admin-sellers.html" class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+            <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">storefront</span>
+          </div>
+          <p id="statSellers" class="stat-card__value" style="font-size:1.75rem;">0</p>
+          <p class="stat-card__label" style="font-size:0.625rem;">SELLERS</p>
+        </a>
+        <!-- Seller Sales -->
+        <a href="admin-diagnostics.html" class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+            <span class="material-symbols-outlined" style="color:var(--secondary); font-size:1.25rem;">payments</span>
+          </div>
+          <p id="statSellerSales" class="stat-card__value" style="font-size:1.75rem;">GH₵0.00</p>
+          <p class="stat-card__label" style="font-size:0.625rem;">3RD PARTY COMMISSIONS</p>
+        </a>
+        <!-- Users -->
+        <a href="admin-users.html" class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+            <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">group</span>
+          </div>
+          <p id="statUsers" class="stat-card__value" style="font-size:1.75rem;">0</p>
+          <p class="stat-card__label" style="font-size:0.625rem;">USERS</p>
+        </a>
+        <!-- Active Admins -->
+        <a href="admin-users.html" class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid #10b981; transition:transform 0.2s; cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+            <span class="material-symbols-outlined" style="color:#10b981; font-size:1.25rem;">sensors</span>
+          </div>
+          <p id="statActiveAdmins" class="stat-card__value" style="font-size:1.75rem;">0</p>
+          <p class="stat-card__label" style="font-size:0.625rem;">ACTIVE ADMINS</p>
+        </a>
+        <!-- Reviews -->
+        <div onclick="openReviewsSheet()" class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid #eab308; transition:transform 0.2s; cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+            <span class="material-symbols-outlined" style="color:#eab308; font-size:1.25rem;">rate_review</span>
+          </div>
+          <p id="statReviews" class="stat-card__value" style="font-size:1.75rem;">0</p>
+          <p class="stat-card__label" style="font-size:0.625rem;">PRODUCT REVIEWS</p>
+        </div>
+        <!-- FB Reads -->
+        <div class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid #6fcf97; transition:transform 0.2s;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+            <span class="material-symbols-outlined" style="color:#6fcf97; font-size:1.25rem;">database</span>
+          </div>
+          <p id="statReads" class="stat-card__value" style="font-size:1.75rem;">0</p>
+          <p class="stat-card__label" style="font-size:0.625rem;">FB READS (TODAY)</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Actions -->
+    <section style="margin-bottom:3rem;">
+      <h2 class="section-header">Quick Actions</h2>
+      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.75rem;">
+        <!-- Add Product -->
+        <a href="admin-add-product.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:linear-gradient(135deg, var(--on-surface), var(--primary-container)); color:white; border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="font-size:1.75rem;">add_box</span>
+          <span class="font-headline" style="font-weight:700; font-size:0.875rem; letter-spacing:-0.01em;">NEW
+            PRODUCT</span>
+        </a>
+        <!-- Manage Sellers -->
+        <a href="admin-sellers.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">storefront</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">SELLERS</span>
+        </a>
+
+        <!-- Manage Categories -->
+        <a href="admin-categories.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">category</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">CATEGORIES</span>
+        </a>
+        <!-- Theme Settings -->
+        <a href="admin-theme.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">palette</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">THEME /
+            UI</span>
+        </a>
+        <!-- Admin Management -->
+        <a href="admin-users.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">group</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">ADMIN
+            TEAM</span>
+        </a>
+        <!-- Business Insights -->
+        <a href="admin-diagnostics.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">query_stats</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">INSIGHTS</span>
+        </a>
+        <!-- Service Billing -->
+        <a href="admin-billing.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">payments</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">BILLING SHEET</span>
+        </a>
+        <!-- Generate QR Code -->
+        <div onclick="showQrModal()" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl); cursor:pointer;">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">qr_code_2</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">STORE QR
+            CODE</span>
+        </div>
+        <!-- Live Widget -->
+        <a href="admin-widget.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:linear-gradient(135deg, #09090b, #18181b); color:white; border:1px solid rgba(255,255,255,0.08); border-radius:var(--radius-xl); box-shadow:0 8px 24px rgba(0,0,0,0.12);">
+          <span class="material-symbols-outlined" style="color:#0ea5e9; font-size:1.75rem;">monitoring</span>
+          <span class="font-headline" style="font-weight:700; font-size:0.875rem; letter-spacing:-0.01em;">LIVE
+            WIDGET</span>
+        </a>
+      </div>
+    </section>
+
+    <!-- Notification Alerts Settings -->
+    <section style="margin-bottom:3rem;">
+      <h2 class="section-header">Alert & Sound Center</h2>
+      <div class="card card--flat" style="padding:1.5rem;background:var(--surface-container-high);display:flex;flex-direction:column;gap:1.25rem;">
+        
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
+          <div style="flex:1;">
+            <p style="font-weight:700;font-size:0.875rem;margin-bottom:0.15rem;display:flex;align-items:center;gap:0.4rem;">
+              <span class="material-symbols-outlined" style="color:var(--primary);font-size:1.125rem;">volume_up</span>
+              Audible Order Notifications
+            </p>
+            <p class="text-body-sm" style="color:var(--outline);font-size:0.75rem;">
+              Plays a chiptune chime sound in real-time when new orders arrive.
+            </p>
+          </div>
+          <button id="testAudioBtn" onclick="testNotificationSound()" class="btn-primary" style="width:auto;padding:0.625rem 1rem;font-size:0.75rem;border-radius:var(--radius-lg);display:flex;align-items:center;gap:0.25rem;flex-shrink:0;">
+            <span class="material-symbols-outlined" style="font-size:0.875rem;">play_arrow</span>
+            Test sound
+          </button>
+        </div>
+
+        <div style="border-top:1px dashed var(--outline-variant);padding-top:1rem;display:flex;align-items:center;gap:0.75rem;background:var(--surface-container-lowest);padding:0.75rem 1rem;border-radius:var(--radius-lg);">
+          <span class="material-symbols-outlined" style="font-size:1.25rem;color:#166534;flex-shrink:0;">security</span>
+          <div>
+            <p style="font-size:0.7rem;font-weight:700;color:var(--outline);text-transform:uppercase;letter-spacing:0.04em;">Browser Autoplay Guard</p>
+            <p style="font-size:0.75rem;color:var(--on-surface-variant);line-height:1.25;">
+              Tapping "Test Sound" actively unlocks browser security policies so background chime notifications can play automatically.
+            </p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Store Settings -->
+    <section style="margin-bottom:3rem;">
+      <h2 class="section-header">Store Configuration</h2>
+      <div class="card card--flat" style="padding:1.5rem;background:var(--surface-container-high);">
+        <div class="form-group">
+          <label class="form-group__label">New Tag Duration (Days)</label>
+          <div style="display:flex;gap:0.75rem;margin-top:0.5rem;">
+            <input type="number" id="newTagDurationInput" class="minimal-input"
+              style="flex:1;border-radius:var(--radius-lg);background:var(--surface-container-lowest);"
+              placeholder="e.g. 7" />
+            <button onclick="saveStoreSettings()" class="btn-primary" style="width:auto;padding:0 1.5rem;">Save</button>
+          </div>
+          <p class="text-body-sm" style="color:var(--outline);margin-top:0.75rem;">
+            Duration a product remains tagged as "NEW" after creation.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Recent Orders Activity -->
+    <section>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:1.5rem;">
+        <h2 class="section-header" style="margin-bottom:0;">Recent Orders</h2>
+        <a href="admin-orders.html" class="text-label-sm"
+          style="color:var(--primary);border-bottom:1px solid var(--primary);padding-bottom:0.125rem;">VIEW ALL</a>
+      </div>
+      <div id="recentOrders"
+        style="background:var(--surface-container-low);border-radius:var(--radius-2xl);padding:0.5rem;">
+        <!-- Rendered by JS -->
+      </div>
+      <div id="noOrders" style="display:none;">
+        <div class="empty-state" style="padding:2rem;">
+          <span class="material-symbols-outlined empty-state__icon" style="font-size:2rem;">receipt_long</span>
+          <p class="empty-state__title" style="font-size:1rem;">No orders yet</p>
+          <p class="empty-state__text" style="font-size:0.8125rem;">Orders will appear here when customers place them.
+          </p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ═══ Admin Reviews Sheet ═══ -->
+  <div id="reviewsAdminSheetOverlay" class="modal-overlay" onclick="if(event.target===this) closeReviewsSheet()"
+    style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:200; align-items:flex-end; justify-content:center;">
+    <div class="modal-content"
+      style="background:var(--surface-container-lowest); border-radius:2rem 2rem 0 0; width:100%; max-width:600px; max-height:85dvh; overflow-y:auto; padding:1.5rem 1.5rem 3rem; animation:slideUp 0.35s cubic-bezier(0.16,1,0.3,1); text-align:left;">
+      <div style="width:3rem; height:4px; background:var(--outline-variant); border-radius:2px; margin:0 auto 1.5rem;">
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+        <div>
+          <h2 style="font-family:var(--font-headline);font-weight:900;font-size:1.25rem;letter-spacing:-0.03em;">Product
+            Reviews</h2>
+          <p style="font-size:0.75rem;color:var(--outline);margin-top:0.25rem;">Moderate and trace all customer feedback
+          </p>
+        </div>
+        <button onclick="closeReviewsSheet()"
+          style="width:2.5rem;height:2.5rem;border-radius:50%;background:var(--surface-container-high);display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <!-- Seller Filter Toggle -->
+      <div style="margin-bottom:1.5rem;">
+        <label
+          style="font-size:0.75rem;font-weight:800;color:var(--outline);display:block;margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.04em;">Filter
+          by Store / Seller</label>
+        <select id="adminReviewSellerFilter" onchange="renderAdminReviews()"
+          style="width:100%;padding:0.75rem 1rem;border-radius:var(--radius-lg);background:var(--surface-container-low);border:1px solid var(--outline-variant);color:var(--on-surface);font-size:0.875rem;font-weight:700;outline:none;">
+          <option value="all">✨ All Stores & Sellers</option>
+          <option value="main">🏪 Kwabz Main Store</option>
+        </select>
+      </div>
+
+      <div id="adminReviewsList">
+        <!-- Injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ QR Code Modal ═══ -->
+  <div class="modal-overlay" id="qrModal" onclick="if(event.target===this) closeQrModal()">
+    <div class="modal-content"
+      style="text-align:center; padding:2rem 1.5rem; max-width:400px; width:90%; display:flex; flex-direction:column; gap:1.5rem;">
+      <div>
+        <h2 class="font-headline text-headline-lg">Generate QR Code</h2>
+        <p class="text-body-sm" style="color:var(--outline);margin-top:0.25rem;">Enter any link to generate a scannable
+          QR code.</p>
+      </div>
+
+      <div class="form-group" style="text-align:left; margin-bottom: 0;">
+        <label class="form-group__label">Quick Select Store</label>
+        <select id="qrQuickSelect" class="minimal-input" onchange="handleQrSelectChange()" style="margin-bottom:1rem;">
+          <option value="main">Main Store Homepage</option>
+        </select>
+
+        <label class="form-group__label">Custom Target Link</label>
+        <input id="qrCodeInput" class="minimal-input" type="url" placeholder="https://..." oninput="updateQrCode()" />
+      </div>
+
+      <div
+        style="background:white; padding:1.5rem; border-radius:var(--radius-xl); display:inline-block; box-shadow:0 10px 40px rgba(0,0,0,0.08); margin:0 auto;">
+        <img id="qrCodeImage" src="" alt="Store QR Code" style="width:200px; height:200px; display:block;"
+          crossorigin="anonymous" />
+      </div>
+
+      <div style="display:flex; gap:1rem; justify-content:center;">
+        <button class="btn-secondary" onclick="shareQr()"
+          style="flex:1; display:flex; align-items:center; justify-content:center; gap:0.5rem; border-color:var(--outline-variant);">
+          <span class="material-symbols-outlined" style="font-size:1.25rem;">share</span> Share
+        </button>
+        <button class="btn-primary" onclick="downloadQr()"
+          style="flex:1; display:flex; align-items:center; justify-content:center; gap:0.5rem;">
+          <span class="material-symbols-outlined" style="font-size:1.25rem;">download</span> Download
+        </button>
+      </div>
+
+      <button class="btn-secondary" onclick="closeQrModal()" style="border:none; background:transparent;">Close</button>
+    </div>
+  </div>
+
+  <!-- ═══ Side Drawer Style Override ═══ -->
+  <style>
+    #adminDrawer .modal-content {
+      transform: translateX(-100%) !important;
+    }
+
+    #adminDrawer.open .modal-content {
+      transform: translateX(0) !important;
+    }
+  </style>
+
+  <!-- ═══ Admin Bottom Nav ═══ -->
+  <nav class="bottom-nav-admin">
+    <a href="admin-dashboard.html" class="bottom-nav-admin__item active">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">dashboard</span>
+      <span>Stats</span>
+    </a>
+    <a href="admin-products.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">inventory_2</span>
+      <span>Products</span>
+    </a>
+    <a href="admin-diagnostics.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">query_stats</span>
+      <span>Insights</span>
+    </a>
+    <a href="admin-orders.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">receipt_long</span>
+      <span>Orders</span>
+    </a>
+  </nav>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="store.js?v=2.4.9"></script>
+  <script src="utils.js?v=2.4.9"></script>
+  <script type="module" src="shell.js?v=2.4.9"></script>
+  <script>
+    // ─── Store-ready deferred execution ──────────────────────────────────────────
+    // shell.js is type=module so it runs AFTER all inline scripts.
+    // We must wait for KwabzStore to emit 'store_initialized' before registering
+    // any listeners, otherwise sync_status events are missed and the pill stays stuck.
+    window._kwabzReadyCallbacks = window._kwabzReadyCallbacks || [];
+    function _onStoreReady(fn) {
+      if (window._kwabzStoreReady) { fn(); }
+      else { window._kwabzReadyCallbacks.push(fn); }
+    }
+    // shell.js listens for 'store_initialized' from KwabzStore and flushes _kwabzReadyCallbacks.
+    // So we just push our callback and it will be called at the right time.
+
+    _onStoreReady(() => {
+      // ─── Telemetry Instrumentation & Diagnostics (Goal 1 & 2) ───
+      console.log('[Kwabz Ready] Store ready callback executed.');
+      console.log('[Kwabz Ready] Store isInitialized:', typeof KwabzStore !== 'undefined' && typeof KwabzStore.isInitialized === 'function' ? KwabzStore.isInitialized() : 'N/A');
+      console.log('[Kwabz Ready] Auth status isAuthReady:', typeof KwabzStore !== 'undefined' && typeof KwabzStore.isAuthReady === 'function' ? KwabzStore.isAuthReady() : 'N/A');
+      console.log('[Kwabz Ready] Admin logged in:', typeof KwabzStore !== 'undefined' && typeof KwabzStore.isAdminLoggedIn === 'function' ? KwabzStore.isAdminLoggedIn() : 'N/A');
+      console.log('[Kwabz Ready] Current User:', typeof KwabzStore !== 'undefined' && typeof KwabzStore.getCurrentUser === 'function' ? KwabzStore.getCurrentUser()?.email || 'N/A' : 'N/A');
+      console.log('[Kwabz Ready] Current Sync Status:', typeof KwabzStore !== 'undefined' && typeof KwabzStore.getSyncStatus === 'function' ? KwabzStore.getSyncStatus() : 'N/A');
+      console.log('[Kwabz Ready] Cached orders count:', typeof KwabzStore !== 'undefined' && typeof KwabzStore.getOrders === 'function' ? KwabzStore.getOrders().length : 'N/A');
+
+      if (!KwabzUtils.requireAdmin()) {
+        console.warn('[Kwabz Ready] requireAdmin check failed. Redirecting to admin-login.html...');
+        return;
+      }
+
+      // Shared tracking variable to capture outcome of manual force sync (Goal 4)
+      let manualSyncInProgress = false;
+      let syncAttemptResolved = false;
+
+      window.handleManualRefresh = async function () {
+        console.log('[Dashboard] Manual sync requested.');
+        KwabzUtils.toast('♻️ Re-syncing database feed...', 'info');
+        manualSyncInProgress = true;
+        syncAttemptResolved = false;
+        
+        // 8-second safety guard to prevent hanging UI
+        setTimeout(() => {
+          if (manualSyncInProgress && !syncAttemptResolved) {
+            syncAttemptResolved = true;
+            manualSyncInProgress = false;
+            KwabzUtils.toast('⚠️ Sync is taking longer than expected. Please check your connection.', 'info');
+            console.warn('[Dashboard] Manual sync hit 8-second safety timeout.');
+          }
+        }, 8000);
+
+        try {
+          await KwabzStore.refreshAll();
+        } catch (e) {
+          syncAttemptResolved = true;
+          manualSyncInProgress = false;
+          KwabzUtils.toast(`❌ Sync failed: ${e.message}`, 'error');
+          console.error('[Dashboard] manual refresh error:', e);
+        }
+      };
+
+      // ─── Sync Badge ────────────────────────────────────────────
+      function updateSyncBadge(status, errMsg) {
+        const badge = document.getElementById('syncStatus');
+        if (!badge) return;
+
+        // Remove existing error container if present
+        const oldBox = document.getElementById('syncErrorBox');
+        if (oldBox) oldBox.remove();
+
+        const states = {
+          syncing: { text: 'SYNCING', color: 'var(--primary)', bg: 'var(--surface-container-highest)', icon: 'sync' },
+          online: { text: 'LIVE', color: '#166534', bg: '#dcfce7', icon: 'database' },
+          offline: { text: 'OFFLINE', color: 'var(--outline)', bg: 'var(--surface-container-high)', icon: 'cloud_off' }
+        };
+        const s = states[status] || states.offline;
+        badge.style.color = s.color;
+        badge.style.background = s.bg;
+        badge.innerHTML = `<span class="material-symbols-outlined ${status === 'syncing' ? 'loading-spin-anim' : ''}" style="font-size:0.875rem;">${s.icon}</span> ${s.text}`;
+
+        if (status === 'offline' && errMsg) {
+          const errBox = document.createElement('div');
+          errBox.id = 'syncErrorBox';
+          errBox.style.cssText = 'position:fixed;top:5.5rem;right:1.5rem;z-index:9999;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;padding:1rem 1.25rem;border-radius:12px;font-size:0.8125rem;font-weight:700;box-shadow:0 10px 25px rgba(0,0,0,0.1);max-width:320px;display:flex;align-items:flex-start;gap:0.75rem;animation:slideInNotif 0.3s cubic-bezier(0.16,1,0.3,1);';
+          errBox.innerHTML = `
+            <span class="material-symbols-outlined" style="color:#b91c1c;font-size:1.25rem;flex-shrink:0;">warning</span>
+            <div style="flex:1;text-align:left;">
+              <p style="margin:0;font-weight:800;font-size:0.875rem;">Sync Failure</p>
+              <p style="margin:0.25rem 0 0;font-size:0.75rem;line-height:1.4;color:#7f1d1d;font-weight:500;">${errMsg}</p>
+            </div>
+            <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:#b91c1c;cursor:pointer;padding:0;display:flex;align-items:center;"><span class="material-symbols-outlined" style="font-size:1rem;">close</span></button>
+          `;
+          document.body.appendChild(errBox);
+
+          if (!document.getElementById('slideInNotif-style')) {
+            const st = document.createElement('style');
+            st.id = 'slideInNotif-style';
+            st.textContent = `@keyframes slideInNotif { from { opacity:0; transform:translateX(2rem); } to { opacity:1; transform:translateX(0); } }`;
+            document.head.appendChild(st);
+          }
+        }
+      }
+
+      // ─── Backend Server Status Badge ───────────────────────────
+      function updateBackendBadge(status) {
+        const badge = document.getElementById('backendStatus');
+        if (!badge) return;
+
+        const states = {
+          online: { text: 'SERVER: ONLINE', color: '#166534', bg: '#dcfce7', icon: 'dns' },
+          offline: { text: 'SERVER: OFFLINE', color: '#b91c1c', bg: '#fee2e2', icon: 'dns' }
+        };
+        const s = states[status] || states.offline;
+        badge.style.color = s.color;
+        badge.style.background = s.bg;
+        badge.innerHTML = `<span class="material-symbols-outlined" style="font-size:0.875rem;">${s.icon}</span> ${s.text}`;
+      }
+
+      const style = document.createElement('style');
+      style.textContent = `@keyframes hubSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } .loading-spin-anim { animation: hubSpin 2s linear infinite; }`;
+      document.head.appendChild(style);
+
+      // Update badge immediately and on every change
+      updateSyncBadge(KwabzStore.getSyncStatus());
+      KwabzStore.on('sync_status', (s, err) => updateSyncBadge(s, err));
+
+      updateBackendBadge(KwabzStore.getBackendStatus ? KwabzStore.getBackendStatus() : 'offline');
+      KwabzStore.on('backend_status', (status) => updateBackendBadge(status));
+
+      // ─── Settings ──────────────────────────────────────────────
+      function initSettings() {
+        const settings = KwabzStore.getSettings();
+        if (settings && settings.theme && typeof KwabzUtils.applyGlobalTheme === 'function') {
+          KwabzUtils.applyGlobalTheme(settings.theme);
+        }
+      }
+      initSettings();
+      KwabzStore.on('settings_changed', (s) => {
+        const theme = (s && s.theme) ? s.theme : s;
+        if (typeof KwabzUtils.applyGlobalTheme === 'function') KwabzUtils.applyGlobalTheme(theme);
+      });
+
+      // ─── Dashboard Render ──────────────────────────────────────
+      function renderRecentOrders() {
+        const orders = KwabzStore.getOrders().slice(0, 5);
+        const container = document.getElementById('recentOrders');
+        const noOrders = document.getElementById('noOrders');
+        if (!container) return;
+
+        if (orders.length === 0) {
+          container.style.display = 'none';
+          if (noOrders) noOrders.style.display = 'block';
+          return;
+        }
+        if (noOrders) noOrders.style.display = 'none';
+        container.style.display = '';
+
+        const statusIcon = (s) =>
+          s === 'pending' ? 'schedule' :
+            s === 'confirmed' ? 'check_circle' :
+              s === 'shipped' ? 'local_shipping' :
+                s === 'delivered' ? 'done_all' : 'receipt_long';
+
+        container.innerHTML = orders.map(order => {
+          const isMiniStore = order.seller_id && order.seller_id !== 'main';
+          const sellerText = isMiniStore ? ` • <span style="font-weight:700;color:var(--primary);background:var(--surface-container-high);padding:0.05rem 0.35rem;border-radius:4px;font-size:0.65rem;">${order.seller_name || 'Mini-Store'}</span>` : '';
+          const commText = (isMiniStore && typeof order.admin_commission === 'number') ? ` • <span style="font-weight:700;color:#166534;font-size:0.6875rem;">Comm: +${KwabzUtils.formatPrice(order.admin_commission)}</span>` : '';
+          return `
+          <div class="activity-row">
+            <div style="display:flex;align-items:center;gap:1.5rem;">
+              <div class="activity-row__icon">
+                <span class="material-symbols-outlined" style="color:var(--primary);">${statusIcon(order.status)}</span>
+              </div>
+              <div>
+                <p class="font-headline" style="font-weight:700;font-size:0.875rem;">${order.order_label || order.order_number || ''}</p>
+                <p style="font-size:0.75rem;color:var(--outline);font-weight:500;display:flex;align-items:center;gap:0.25rem;flex-wrap:wrap;">
+                  ${order.customer?.name || 'Guest'} • <span>${KwabzUtils.formatPrice(order.total_price || 0)}</span>${sellerText}${commText}
+                </p>
+              </div>
+            </div>
+            <p class="text-label-sm" style="color:var(--outline);">${KwabzUtils.timeAgo(order.created_at)}</p>
+          </div>
+          `;
+        }).join('');
+      }
+
+      async function saveStoreSettings() {
+        const input = document.getElementById('newTagDurationInput');
+        if (!input) return;
+        const duration = parseInt(input.value);
+        if (isNaN(duration) || duration < 0) {
+          KwabzUtils.toast('Please enter a valid number of days', 'error');
+          return;
+        }
+        try {
+          await KwabzStore.updateSettings({ newTagDuration: duration });
+          KwabzUtils.toast('Settings updated and synced to cloud');
+        } catch (err) {
+          KwabzUtils.toast('Failed to update settings', 'error');
+        }
+      }
+      // Expose saveStoreSettings globally for onclick handler
+      window.saveStoreSettings = saveStoreSettings;
+
+      // ─── QR Code Modal ─────────────────────────────────────────
+      function showQrModal() {
+        const sellers = KwabzStore.getSellers() || [];
+        const select = document.getElementById('qrQuickSelect');
+        if (select) {
+          select.innerHTML = '<option value="main">Main Store Homepage</option>' +
+            sellers.map(s => `<option value="${s.id}">${s.name} (Mini-Store)</option>`).join('');
+          select.value = 'main';
+        }
+
+        const url = window.location.origin;
+        document.getElementById('qrCodeInput').value = url;
+        _generateAndSetQr(url);
+        document.getElementById('qrModal').classList.add('open');
+      }
+
+      function handleQrSelectChange() {
+        const val = document.getElementById('qrQuickSelect').value;
+        const origin = window.location.origin;
+        let targetUrl = origin;
+        if (val !== 'main') {
+          targetUrl = `${origin}/seller-store.html?id=${val}`;
+        }
+        document.getElementById('qrCodeInput').value = targetUrl;
+        updateQrCode();
+      }
+
+      function closeQrModal() {
+        document.getElementById('qrModal').classList.remove('open');
+      }
+
+      // Helper to asynchronously load image for canvas usage
+      function loadImage(src) {
+        return new Promise((resolve, reject) => {
+          if (!src) {
+            reject(new Error('No image source provided'));
+            return;
+          }
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error('Failed to load image: ' + src));
+          img.src = src;
+        });
+      }
+
+      // Helper to generate initials from store/seller name
+      function getInitials(name) {
+        if (!name) return 'KS';
+        const words = name.trim().split(/\s+/);
+        if (words.length >= 2) {
+          return (words[0][0] + words[1][0]).toUpperCase();
+        }
+        return name.trim().substring(0, 2).toUpperCase();
+      }
+
+      // Helper to darken or lighten a hex color slightly
+      function adjustColorBrightness(hex, percent) {
+        hex = String(hex).replace(/[^0-9a-f]/gi, '');
+        if (hex.length < 6) {
+          hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        let num = parseInt(hex, 16),
+          amt = Math.round(2.55 * percent),
+          R = (num >> 16) + amt,
+          G = (num >> 8 & 0x00FF) + amt,
+          B = (num & 0x0000FF) + amt;
+        return "#" + (0x1000000 + (R < 255 ? R < 0 ? 0 : R : 255) * 0x10000 + (G < 255 ? G < 0 ? 0 : G : 255) * 0x100 + (B < 255 ? B < 0 ? 0 : B : 255)).toString(16).slice(1);
+      }
+
+      // Helper to draw a beautiful circular badge with initials in center
+      function drawInitialsBadge(ctx, cx, cy, radius, name, color) {
+        // Retrieve branding configs
+        const settings = KwabzStore.getSettings() || {};
+        const theme = settings.theme || {};
+        const themeFont = theme.fontFamily || "'Outfit', 'Inter', 'Segoe UI', sans-serif";
+
+        const grad = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
+        grad.addColorStop(0, color);
+        grad.addColorStop(1, adjustColorBrightness(color, -25));
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        const initials = getInitials(name);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.round(radius * 0.9)}px ${themeFont}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(initials, cx, cy + 1);
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+      }
+
+      // Helper to draw a rounded rectangle (for premium poster card)
+      function drawRoundedRect(ctx, x, y, width, height, radius, fill, shadowColor, shadowBlur) {
+        ctx.save();
+        if (shadowColor) {
+          ctx.shadowColor = shadowColor;
+          ctx.shadowBlur = shadowBlur;
+          ctx.shadowOffsetY = 6;
+        }
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      function _generateAndSetQr(url) {
+        if (!url) return;
+
+        // Request a 500x500 high-res QR code with high error correction (ecc=H)
+        // This ensures the logo overlay does not invalidate the scanning integrity.
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&ecc=H&data=${encodeURIComponent(url)}&color=000000&bgcolor=ffffff&qzone=1`;
+
+        const qrImg = new Image();
+        qrImg.crossOrigin = 'anonymous';
+        qrImg.onload = async function () {
+          const canvas = document.createElement('canvas');
+          canvas.width = 500;
+          canvas.height = 500;
+          const ctx = canvas.getContext('2d');
+
+          // Draw the base QR code
+          ctx.drawImage(qrImg, 0, 0, 500, 500);
+
+          // Retrieve branding configurations
+          const settings = KwabzStore.getSettings() || {};
+          const theme = settings.theme || {};
+          const primaryColor = theme.primaryColor || '#000000';
+
+          const val = document.getElementById('qrQuickSelect')?.value || 'main';
+          let storeName = 'Kwabz Store';
+          let logoUrl = '';
+          if (val === 'main') {
+            storeName = theme.logoText || 'Kwabz Store';
+            logoUrl = (theme.logoType === 'image' && theme.logoImageUrl) ? theme.logoImageUrl : '';
+          } else {
+            const seller = KwabzStore.getSellerById(val);
+            if (seller) {
+              storeName = seller.name || 'Mini-Store';
+              logoUrl = seller.image_url || '';
+            }
+          }
+
+          const cx = 250;
+          const cy = 250;
+          const rOuter = 46; // Buffer boundary size
+          const rInner = 40; // Central badge size
+
+          // Draw buffer circle
+          ctx.beginPath();
+          ctx.arc(cx, cy, rOuter, 0, 2 * Math.PI);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+
+          // Draw the logo inside circle (image or initials fallback)
+          if (logoUrl) {
+            try {
+              const logoImg = await loadImage(logoUrl);
+              ctx.save();
+              ctx.beginPath();
+              ctx.arc(cx, cy, rInner, 0, 2 * Math.PI);
+              ctx.closePath();
+              ctx.clip();
+
+              const aspect = logoImg.width / logoImg.height;
+              let drawW, drawH, drawX, drawY;
+              if (aspect > 1) {
+                drawH = rInner * 2;
+                drawW = drawH * aspect;
+                drawX = cx - drawW / 2;
+                drawY = cy - rInner;
+              } else {
+                drawW = rInner * 2;
+                drawH = drawW / aspect;
+                drawX = cx - rInner;
+                drawY = cy - drawH / 2;
+              }
+              ctx.drawImage(logoImg, drawX, drawY, drawW, drawH);
+              ctx.restore();
+
+              // Draw theme-aligned border outline
+              ctx.beginPath();
+              ctx.arc(cx, cy, rInner, 0, 2 * Math.PI);
+              ctx.lineWidth = 3;
+              ctx.strokeStyle = primaryColor;
+              ctx.stroke();
+            } catch (e) {
+              console.warn("Logo image failed to load. Falling back to initials badge.", e);
+              drawInitialsBadge(ctx, cx, cy, rInner, storeName, primaryColor);
+            }
+          } else {
+            drawInitialsBadge(ctx, cx, cy, rInner, storeName, primaryColor);
+          }
+
+          window._lastQrCanvas = canvas;
+          document.getElementById('qrCodeImage').src = canvas.toDataURL('image/png');
+        };
+
+        qrImg.onerror = function () {
+          console.error("Failed to fetch base QR code from api.qrserver.com");
+          KwabzUtils.toast('Failed to load QR code template', 'error');
+        };
+
+        qrImg.src = qrUrl;
+      }
+
+      function updateQrCode() {
+        const inputUrl = document.getElementById('qrCodeInput').value.trim();
+        _generateAndSetQr(inputUrl);
+      }
+
+      async function downloadQr() {
+        const qrCanvas = window._lastQrCanvas;
+        if (!qrCanvas) {
+          KwabzUtils.toast('Please wait for QR code to generate...', 'error');
+          return;
+        }
+
+        try {
+          KwabzUtils.toast('🎨 Preparing premium layout download...', 'info');
+
+          // Construct high-resolution poster card (800x1100 px)
+          const posterCanvas = document.createElement('canvas');
+          posterCanvas.width = 800;
+          posterCanvas.height = 1100;
+          const ctx = posterCanvas.getContext('2d');
+
+          // Get configurations
+          const settings = KwabzStore.getSettings() || {};
+          const theme = settings.theme || {};
+          const primaryColor = theme.primaryColor || '#000000';
+          const themeFont = theme.fontFamily || "'Outfit', 'Inter', 'Segoe UI', sans-serif";
+
+          const val = document.getElementById('qrQuickSelect')?.value || 'main';
+          let storeName = 'Kwabz Store';
+          if (val === 'main') {
+            storeName = theme.logoText || 'Kwabz Store';
+          } else {
+            const seller = KwabzStore.getSellerById(val);
+            if (seller) {
+              storeName = seller.name || 'Mini-Store';
+            }
+          }
+
+          // 1. Draw premium background gradient
+          const bgGrad = ctx.createLinearGradient(0, 0, 0, 1100);
+          bgGrad.addColorStop(0, '#fcfcfd');
+          bgGrad.addColorStop(1, '#f3f4f6');
+          ctx.fillStyle = bgGrad;
+          ctx.fillRect(0, 0, 800, 1100);
+
+          // Subtle luxury card borders
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.04)';
+          ctx.lineWidth = 16;
+          ctx.strokeRect(30, 30, 740, 1040);
+
+          // Top brand primary accent bar
+          ctx.fillStyle = primaryColor;
+          ctx.fillRect(40, 40, 720, 8);
+
+          // 2. Draw Store Name
+          ctx.fillStyle = '#111827';
+          ctx.font = `900 38px ${themeFont}`;
+          ctx.textAlign = 'center';
+          ctx.fillText(storeName.toUpperCase(), 400, 135);
+
+          // Decorative subtle divider under name
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(320, 175);
+          ctx.lineTo(480, 175);
+          ctx.stroke();
+
+          // 3. Draw white QR code card container with smooth shadow
+          drawRoundedRect(ctx, 110, 230, 580, 580, 32, '#ffffff', 'rgba(0,0,0,0.06)', 16);
+
+          // 4. Center and draw the generated QR code (500x500 px)
+          ctx.drawImage(qrCanvas, 150, 270, 500, 500);
+
+          // 5. Draw catchy premium Call-To-Action (CTA) messages
+          ctx.fillStyle = primaryColor;
+          ctx.font = `bold 24px ${themeFont}`;
+          ctx.textAlign = 'center';
+          ctx.fillText("SCAN TO VIEW CATALOGUE & PLACE ORDERS", 400, 885);
+
+          ctx.fillStyle = '#4b5563';
+          ctx.font = `500 16px ${themeFont}`;
+          ctx.fillText("View our latest products, get custom discounts, and order on WhatsApp!", 400, 925);
+
+          ctx.fillStyle = '#9ca3af';
+          ctx.font = `bold 12px ${themeFont}`;
+          ctx.fillText("POWERED BY KWABZ STORE PLATFORM", 400, 1015);
+
+          // 6. Output to blob and trigger safe local download
+          posterCanvas.toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${storeName.replace(/\s+/g, '_')}_QR_Poster.png`;
+            a.click();
+            URL.revokeObjectURL(url);
+            KwabzUtils.toast('Premium QR Poster downloaded successfully!', 'success');
+          }, 'image/png');
+
+        } catch (e) {
+          console.error(e);
+          KwabzUtils.toast('Failed to download premium QR code poster', 'error');
+        }
+      }
+
+      async function shareQr() {
+        const img = document.getElementById('qrCodeImage');
+        const link = document.getElementById('qrCodeInput').value.trim();
+        if (!img.src) return;
+
+        try {
+          const res = await fetch(img.src);
+          const blob = await res.blob();
+          const file = new File([blob], 'Kwabz_Store_QR.png', { type: 'image/png' });
+
+          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              title: 'Kwabz Store QR',
+              text: 'Scan to visit our store!',
+              files: [file]
+            });
+          } else if (navigator.share) {
+            // Fallback: Just share the link
+            await navigator.share({ title: 'Kwabz Store', url: link });
+          } else {
+            KwabzUtils.toast('Sharing is not supported on this device/browser', 'error');
+          }
+        } catch (e) {
+          console.error(e);
+          if (e.name !== 'AbortError') {
+            KwabzUtils.toast('Share failed', 'error');
+          }
+        }
+      }
+
+      window.showQrModal = showQrModal;
+      window.closeQrModal = closeQrModal;
+      window.handleQrSelectChange = handleQrSelectChange;
+      // Use debounce from KwabzUtils so we don't spam the API while typing
+      window.updateQrCode = KwabzUtils.debounce ? KwabzUtils.debounce(updateQrCode, 500) : updateQrCode;
+      window.downloadQr = downloadQr;
+      window.shareQr = shareQr;
+
+      // ─── Admin Reviews Management Panel ───
+      function openReviewsSheet() {
+        // Populate the dropdown with current active stores
+        const select = document.getElementById('adminReviewSellerFilter');
+        if (select) {
+          const sellers = KwabzStore.getSellers() || [];
+          select.innerHTML = '<option value="all">✨ All Stores & Sellers</option>' +
+            '<option value="main">🏪 Kwabz Main Store</option>' +
+            sellers.map(s => `<option value="${s.id}">👤 Seller: ${s.name}</option>`).join('');
+        }
+        document.getElementById('reviewsAdminSheetOverlay').style.display = 'flex';
+        renderAdminReviews();
+      }
+
+      function closeReviewsSheet() {
+        document.getElementById('reviewsAdminSheetOverlay').style.display = 'none';
+      }
+
+      async function renderAdminReviews() {
+        const container = document.getElementById('adminReviewsList');
+        if (!container) return;
+
+        container.innerHTML = `
+          <div style="text-align:center;padding:2rem;color:var(--outline);">
+            <div class="spinner" style="width:32px;height:32px;"></div>
+            <p style="margin-top:1rem;font-size:0.875rem;">Loading product reviews...</p>
+          </div>`;
+
+        try {
+          // OPTIMIZATION: Use cached getReviewsAll() — 3-min TTL, single read for the entire collection.
+          // Also seeds the per-product cache so product-detail pages cost 0 reads afterwards.
+          const reviews = await KwabzStore.getReviewsAll();
+          reviews.sort((a, b) => (KwabzUtils.getSafeTime ? KwabzUtils.getSafeTime(b.created_at) : 0) - (KwabzUtils.getSafeTime ? KwabzUtils.getSafeTime(a.created_at) : 0));
+
+          // Set counts
+          const statEl = document.getElementById('statReviews');
+          if (statEl) statEl.textContent = reviews.length.toLocaleString();
+
+          // Get active filter value
+          const filterVal = document.getElementById('adminReviewSellerFilter')?.value || 'all';
+
+          // Map and filter reviews based on product's seller_id
+          const mappedReviews = [];
+          for (const r of reviews) {
+            const product = KwabzStore.getProductById(r.product_id);
+            const sellerId = product?.seller_id || 'main';
+
+            // Filter logic
+            if (filterVal !== 'all' && sellerId !== filterVal) {
+              continue; // skip this review
+            }
+            mappedReviews.push({ r, product });
+          }
+
+          if (mappedReviews.length === 0) {
+            container.innerHTML = `
+              <div style="text-align:center;padding:3rem;color:var(--outline);">
+                <span class="material-symbols-outlined" style="font-size:3rem;color:var(--outline);">rate_review</span>
+                <p style="font-weight:700;margin-top:1rem;color:var(--on-surface);">No reviews found</p>
+                <p style="font-size:0.8125rem;color:var(--outline);margin-top:0.5rem;">No reviews matched this store filter choice.</p>
+              </div>`;
+            return;
+          }
+
+          container.innerHTML = mappedReviews.map(({ r, product: resolvedProduct }) => {
+            const product = resolvedProduct || KwabzStore.getProductById(r.product_id);
+            const productName = product ? product.name : 'Unknown Product';
+            const productImg = product ? `<img src="${product.image_url}" style="width:2.5rem;height:3rem;object-fit:cover;border-radius:var(--radius-md);margin-right:0.75rem;" />` : '';
+            const sellerName = product?.seller_name || 'Main Store';
+            const dateStr = new Date(r.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+            const reviewerInitials = (r.user_name || 'User').substring(0, 2).toUpperCase();
+
+            return `
+              <div class="order-card" style="border-left-color:#eab308;text-align:left;background:var(--surface-container-low);margin-bottom:1rem;">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.75rem;">
+                  <!-- Reviewer -->
+                  <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <div style="width:2.25rem;height:2.25rem;border-radius:50%;background:var(--primary-container);color:var(--primary);font-weight:700;font-size:0.85rem;display:flex;align-items:center;justify-content:center;text-transform:uppercase;font-family:var(--font-headline);">
+                      ${reviewerInitials}
+                    </div>
+                    <div>
+                      <h4 style="font-weight:700;font-size:0.875rem;margin:0;color:var(--on-surface);">${r.user_name || 'Anonymous'}</h4>
+                      <p style="font-size:0.6875rem;color:var(--outline);margin:0;">User ID: ${r.user_id || 'N/A'}</p>
+                    </div>
+                  </div>
+                  
+                  <!-- Date -->
+                  <p style="font-size:0.7rem;color:var(--outline);margin:0;">${dateStr}</p>
+                </div>
+
+                <!-- Stars & Text -->
+                <div style="margin-bottom:0.75rem;background:var(--surface-container-lowest);padding:0.75rem;border-radius:var(--radius-lg);border:1px solid var(--outline-variant);">
+                  <div style="color:#eab308;display:flex;gap:0.1rem;font-size:0.8rem;margin-bottom:0.4rem;">
+                    ${getStarsHtmlHelper(r.rating)}
+                  </div>
+                  <p style="font-size:0.8125rem;color:var(--on-surface-variant);line-height:1.5;margin:0;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;">${r.comment}</p>
+                </div>
+
+                <!-- Product Source ("Where it's coming from") -->
+                <div style="display:flex;align-items:center;padding:0.6rem;background:var(--surface-container-high);border-radius:var(--radius-md);margin-bottom:0.75rem;border:1px solid var(--outline-variant);">
+                  ${productImg}
+                  <div style="flex:1;min-width:0;">
+                    <span style="font-size:0.6rem;font-weight:800;color:var(--primary);background:var(--primary-container);padding:0.15rem 0.4rem;border-radius:4px;text-transform:uppercase;letter-spacing:0.04em;">Source: ${sellerName}</span>
+                    <h5 style="font-size:0.8rem;font-weight:700;margin:0.25rem 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--on-surface);">${productName}</h5>
+                  </div>
+                </div>
+
+                <!-- Admin Actions -->
+                <div style="display:flex;justify-content:flex-end;">
+                  <button onclick="deleteReviewByAdmin('${r.id}')" 
+                    style="display:inline-flex;align-items:center;gap:0.3rem;font-size:0.75rem;font-weight:700;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;padding:0.4rem 0.8rem;border-radius:6px;cursor:pointer;">
+                    <span class="material-symbols-outlined" style="font-size:0.95rem;">delete_forever</span> Moderate / Delete
+                  </button>
+                </div>
+              </div>`;
+          }).join('');
+        } catch (err) {
+          container.innerHTML = `<p style="text-align:center;color:var(--error);padding:2rem;">Failed to load reviews: ${err.message}</p>`;
+        }
+      }
+
+      function getStarsHtmlHelper(rating) {
+        let stars = '';
+        for (let i = 1; i <= 5; i++) {
+          stars += `<span class="material-symbols-outlined" style="font-size:inherit;">${i <= rating ? 'star' : 'star_outline'}</span>`;
+        }
+        return stars;
+      }
+
+      async function deleteReviewByAdmin(id) {
+        if (!confirm('Moderate Review?\n\nAre you sure you want to permanently delete this customer review?')) return;
+        try {
+          await firebase.firestore().collection('reviews').doc(id).delete();
+          KwabzUtils.toast('Review moderated/deleted successfully', 'success');
+          
+          // Decrement the displayed reviews count client-side to save reads
+          const el = document.getElementById('statReviews');
+          if (el) {
+            let count = parseInt(el.textContent.replace(/,/g, ''), 10) || 0;
+            if (count > 0) el.textContent = (count - 1).toLocaleString();
+          }
+
+          renderAdminReviews();
+        } catch (err) {
+          KwabzUtils.toast('Moderation failed: ' + err.message, 'error');
+        }
+      }
+
+      // Expose to window
+      window.openReviewsSheet = openReviewsSheet;
+      window.closeReviewsSheet = closeReviewsSheet;
+      window.deleteReviewByAdmin = deleteReviewByAdmin;
+
+
+
+      function testNotificationSound() {
+        if (typeof KwabzUtils !== 'undefined' && typeof KwabzUtils.playNotificationSound === 'function') {
+          // Force lazy initialization and active resume
+          const ctx = KwabzUtils.initAudio ? KwabzUtils.initAudio() : null;
+          if (ctx) {
+            ctx.resume().then(() => {
+              KwabzUtils.playNotificationSound();
+              KwabzUtils.toast('🔊 Sound activated & browser audio unlocked!', 'success');
+            }).catch(err => {
+              KwabzUtils.playNotificationSound();
+              KwabzUtils.toast('🔊 Sound played (unlocking: ' + err.message + ')', 'info');
+            });
+          } else {
+            KwabzUtils.playNotificationSound();
+            KwabzUtils.toast('🔊 Sound played successfully!', 'info');
+          }
+        } else {
+          alert('KwabzUtils.playNotificationSound is not defined or ready.');
+        }
+      }
+      window.testNotificationSound = testNotificationSound;
+
+      function renderDashboard() {
+        const productsCount = KwabzStore.getAllProducts().length;
+        document.getElementById('statProducts').textContent = productsCount.toLocaleString();
+        document.getElementById('statCategories').textContent = KwabzStore.getCategories().length;
+        document.getElementById('statOrders').textContent = KwabzStore.getOrders().length;
+        document.getElementById('statSellers').textContent = KwabzStore.getSellers().length;
+
+        let sellerCommissions = 0;
+        KwabzStore.getOrders().forEach(order => {
+          // Count commission on ALL orders that contain at least one mini-store item
+          const hasMiniStoreItem = (order.items || []).some(i => i.seller_id && i.seller_id !== 'main');
+          if (hasMiniStoreItem) {
+            // Use the commission stored on the order if available; otherwise look up the seller's rate
+            if (typeof order.admin_commission === 'number') {
+              sellerCommissions += order.admin_commission;
+            } else {
+              const seller = KwabzStore.getSellerById(order.seller_id);
+              const rate = (seller && typeof seller.commission === 'number') ? seller.commission : 10;
+              sellerCommissions += order.total_price * (rate / 100);
+            }
+          }
+        });
+        const commEl = document.getElementById('statSellerSales');
+        if (commEl) commEl.textContent = KwabzUtils.formatPrice(sellerCommissions);
+
+        const todayKey = 'kwabz_fb_reads_' + new Date().toISOString().slice(0, 10);
+        const reads = parseInt(localStorage.getItem(todayKey) || '0', 10);
+        const elReads = document.getElementById('statReads');
+        if (elReads) elReads.textContent = reads.toLocaleString();
+
+        renderRecentOrders();
+      }
+
+
+      // Render immediately with any cached data available right now
+      renderDashboard();
+
+
+
+      // ─── Data listeners (Debounced for performance) ──────────
+      const debouncedRender = KwabzUtils.debounce(() => {
+        console.log('[Dashboard] Batch rendering updates...');
+        renderDashboard();
+      }, 50);
+
+      KwabzStore.on('products_changed', debouncedRender);
+      KwabzStore.on('categories_changed', debouncedRender);
+
+      KwabzStore.on('firestore_read', () => {
+        const todayKey = 'kwabz_fb_reads_' + new Date().toISOString().slice(0, 10);
+        const reads = parseInt(localStorage.getItem(todayKey) || '0', 10);
+        const elReads = document.getElementById('statReads');
+        if (elReads) elReads.textContent = reads.toLocaleString();
+      });
+      let previousOrders = null;
+      KwabzStore.on('orders_changed', (orders) => {
+        console.log('[Dashboard Event] orders_changed received. Count:', orders ? orders.length : 0);
+        if (previousOrders !== null) {
+          orders.forEach(newOrder => {
+            const oldOrder = previousOrders.find(o => o.id === newOrder.id);
+            if (oldOrder) {
+              if (oldOrder.status !== 'cancelled' && newOrder.status === 'cancelled') {
+                KwabzUtils.toast(`🚨 Order ${newOrder.order_number || ''} was CANCELLED by the customer!`, 'error');
+              }
+              if (!oldOrder.hidden_by_customer && newOrder.hidden_by_customer) {
+                KwabzUtils.toast(`🗑️ Order ${newOrder.order_number || ''} was DELETED/HIDDEN by the customer!`, 'info');
+              }
+            }
+          });
+        }
+        previousOrders = JSON.parse(JSON.stringify(orders));
+        debouncedRender();
+      });
+      KwabzStore.on('sellers_changed', debouncedRender);
+      KwabzStore.on('admin_ready', debouncedRender);
+
+      // ─── Admin Presence & Visitor Count ────────────────────────────────────────
+      let presenceAttached = false;
+      function attachPresence() {
+        if (presenceAttached) return;
+        presenceAttached = true;
+        KwabzStore.onAdminsPresence((admins) => {
+          const activeCount = admins.filter(a => {
+            // presence data is nested under a.presence (from onAdminsPresence merge)
+            const lastActive = a.presence?.last_active;
+            if (!lastActive) return false;
+            const last = lastActive.toDate ? lastActive.toDate() : new Date(lastActive);
+            const diff = Math.abs(Date.now() - last.getTime());
+            return diff < (15 * 60 * 1000);
+          }).length;
+          const el = document.getElementById('statActiveAdmins');
+          if (el) el.textContent = activeCount;
+        });
+      }
+
+      let visitorCountAttached = false;
+      function attachVisitorCount() {
+        if (visitorCountAttached) return;
+        visitorCountAttached = true;
+        KwabzStore.onVisitorCount((count) => {
+          const el = document.getElementById('statUsers');
+          if (el) el.textContent = count.toLocaleString();
+        });
+      }
+
+      let reviewsCountFetched = false;
+      function fetchReviewsCount() {
+        if (reviewsCountFetched) return;
+        reviewsCountFetched = true;
+        // OPTIMIZATION: Reuse the cached getReviewsAll() — no extra Firestore read.
+        // renderAdminReviews already calls this when the sheet opens, so the count
+        // comes from memory on subsequent calls.
+        KwabzStore.getReviewsAll().then(reviews => {
+          const el = document.getElementById('statReviews');
+          if (el) el.textContent = reviews.length.toLocaleString();
+        }).catch(() => { });
+      }
+
+      function tryAttachListeners() {
+        if (KwabzStore.isAuthReady() && KwabzStore.isAdminLoggedIn() && KwabzStore.getSyncStatus() === 'online') {
+          attachPresence();
+          attachVisitorCount();
+          fetchReviewsCount();
+        }
+      }
+
+      // Try immediately
+      tryAttachListeners();
+
+      // Or when admin/auth resolves or sync status updates
+      KwabzStore.on('admin_ready', tryAttachListeners);
+      KwabzStore.on('sync_status', (s, err) => {
+        console.log(`[Dashboard Event] sync_status updated to: ${s} (Error: ${err || 'none'})`);
+        
+        // Handle manual force sync feedback (Goal 4)
+        if (manualSyncInProgress && !syncAttemptResolved) {
+          if (s === 'online') {
+            syncAttemptResolved = true;
+            manualSyncInProgress = false;
+            KwabzUtils.toast('✨ Database feed fully synchronized and up to date!', 'success');
+            console.log('[Dashboard] Manual sync completed successfully (Online).');
+          } else if (s === 'offline') {
+            syncAttemptResolved = true;
+            manualSyncInProgress = false;
+            KwabzUtils.toast(`❌ Sync failed: ${err || 'Disconnected'}`, 'error');
+            console.warn(`[Dashboard] Manual sync completed with offline status. Error: ${err}`);
+          }
+        }
+
+        if (s === 'online') {
+          tryAttachListeners();
+        }
+        debouncedRender();
+      });
+
+    }); // end _onStoreReady
+  </script>
+</body>
+
+</html>

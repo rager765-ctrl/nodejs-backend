@@ -9,9 +9,12 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@fastify/compress": "^8.3.1",
+    "@fastify/cors": "^11.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "fastify": "^5.8.5",
     "firebase-admin": "^12.1.0",
     "redis": "^4.6.13",
     "socket.io": "^4.7.5"

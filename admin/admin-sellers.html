@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Manage Sellers — Kwabz Store Admin</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+
+<body>
+
+  <!-- ═══ Top App Bar ═══ -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <a href="admin-dashboard.html" class="icon-btn">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </a>
+      <span class="top-app-bar__title font-headline">Manage Sellers</span>
+    </div>
+    <div class="top-app-bar__actions">
+      <button class="icon-btn" onclick="openSellerModal()" title="Add Seller"
+        style="background:var(--primary);color:var(--on-primary);border-radius:var(--radius-lg);">
+        <span class="material-symbols-outlined" style="font-size:1.25rem;">add</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="page-content page-content--admin">
+    <section style="margin-bottom:2rem;">
+      <h2 class="section-header">Mini-Store Directory</h2>
+      <p class="text-body-sm" style="color:var(--outline); margin-top:-1rem; margin-bottom:2rem;">Manage independent sellers and their brand presence.</p>
+
+      <!-- Tabs for Product Sellers vs. Service Providers -->
+      <div style="display:flex; background:var(--surface-container-low); padding:0.35rem; border-radius:1.25rem; margin-bottom:2rem; max-width:26rem; margin-top:-0.5rem; border: 1px solid var(--outline-variant);">
+        <button id="tabSellers" onclick="switchAdminTab('sellers')" style="flex:1; border:none; background:var(--primary); color:var(--on-primary); padding:0.75rem; border-radius:1rem; font-weight:700; cursor:pointer; font-family:var(--font-headline); font-size:0.875rem; transition:all 0.25s ease;">Product Sellers</button>
+        <button id="tabServices" onclick="switchAdminTab('services')" style="flex:1; border:none; background:none; color:var(--outline); padding:0.75rem; border-radius:1rem; font-weight:700; cursor:pointer; font-family:var(--font-headline); font-size:0.875rem; transition:all 0.25s ease;">Service Providers</button>
+      </div>
+
+      <div id="sellerCount" class="text-label-md" style="color:var(--outline); margin-bottom:1rem;">0 SELLERS</div>
+      <div class="data-list" id="sellerList">
+        <!-- JS Populated -->
+      </div>
+
+      <!-- Empty State -->
+      <div id="emptyState" class="empty-state" style="display:none;">
+        <span class="material-symbols-outlined empty-state__icon">storefront</span>
+        <p class="empty-state__title">No Sellers Defined</p>
+        <p class="empty-state__text">Start by adding independent curators to your store network.</p>
+        <button onclick="openSellerModal()" class="btn-primary"
+          style="width:auto;padding:1rem 2rem;margin-top:1.5rem;">Add First Seller</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ═══ Seller Modal (Add/Edit) ═══ -->
+  <div class="modal-overlay" id="sellerModal" onclick="if(event.target===this) closeSellerModal()">
+    <div class="modal-content" style="max-width:32rem; padding:2.5rem; border-radius:1.5rem;">
+      <div class="modal-handle"></div>
+      <h2 class="font-headline text-headline-sm" id="modalTitle" style="margin-bottom:1.5rem;">New Mini-Store</h2>
+
+      <form id="sellerForm" onsubmit="handleSellerSubmit(event)"
+        style="display:flex; flex-direction:column; gap:1.5rem;">
+        <input type="hidden" id="editSellerId" />
+
+        <div class="form-group">
+          <label class="form-group__label">Name</label>
+          <input type="text" id="storeName" class="minimal-input" placeholder="e.g., Thrift by Zen or Zen Hairdressing" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-group__label">Provider Type</label>
+          <select id="storeType" class="minimal-input" onchange="toggleTypeFields(this.value)" style="border-radius: var(--radius-lg); background: var(--surface-container-high); cursor:pointer;">
+            <option value="seller">Product Seller</option>
+            <option value="service">Service Provider (e.g. Hairdresser)</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="redirectGroup" style="display:none;">
+          <label class="form-group__label">Service Booking / Redirect Link</label>
+          <input type="url" id="storeRedirectUrl" class="minimal-input" placeholder="e.g., https://calendly.com/yourname or external website" />
+        </div>
+
+        <div class="form-group" id="professionGroup" style="display:none;">
+          <label class="form-group__label">Profession / Specialty Tag</label>
+          <input type="text" id="storeProfession" class="minimal-input" placeholder="e.g., Hairdresser, Barber, Makeup Artist, Tutor" />
+        </div>
+
+        <!-- Store Logo Upload & URL -->
+        <div class="form-group">
+          <label class="form-group__label">Store Logo (Squircle)</label>
+          <div class="upload-zone" id="logoUploadZone"
+            style="aspect-ratio: 1; max-width: 9rem; margin: 0 auto 0.5rem; border-radius: 1.5rem;">
+            <span class="material-symbols-outlined" style="font-size:2rem;color:var(--outline);margin-bottom:0.25rem;"
+              id="logoUploadIcon">add_a_photo</span>
+            <p class="text-label-sm" style="color:var(--outline); margin: 0;" id="logoUploadText">Upload Logo</p>
+            <input type="file" accept="image/*" id="logoInput" onchange="handleLogoUpload(this)" />
+            <img id="logoPreview" class="upload-zone__preview" style="display:none;" />
+          </div>
+          <input type="text" id="storeLogo" class="minimal-input" placeholder="Or paste logo image URL..."
+            style="font-size:0.8125rem;" oninput="handleLogoUrl(this.value)" />
+        </div>
+
+        <!-- Store Hero Image Upload & URL -->
+        <div class="form-group">
+          <label class="form-group__label">Store Hero/Cover Banner (16:9)</label>
+          <div class="upload-zone" id="heroUploadZone" style="aspect-ratio: 16/9; margin-bottom: 0.5rem;">
+            <span class="material-symbols-outlined" style="font-size:2rem;color:var(--outline);margin-bottom:0.25rem;"
+              id="heroUploadIcon">add_a_photo</span>
+            <p class="text-label-sm" style="color:var(--outline); margin: 0;" id="heroUploadText">Upload Cover Banner
+            </p>
+            <input type="file" accept="image/*" id="heroInput" onchange="handleHeroUpload(this)" />
+            <img id="heroPreview" class="upload-zone__preview" style="display:none;" />
+          </div>
+          <input type="text" id="storeHero" class="minimal-input" placeholder="Or paste hero cover URL..."
+            style="font-size:0.8125rem;" oninput="handleHeroUrl(this.value)" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-group__label">WhatsApp Number (Direct Contact)</label>
+          <input type="tel" id="storeWhatsapp" class="minimal-input" placeholder="e.g. 233240000000" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-group__label">What they sell (Short Bio)</label>
+          <textarea id="storeDescription" class="minimal-input" rows="3"
+            placeholder="Curated vintage finds for students..." style="resize:none;" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-group__label">Admin Commission (%)</label>
+          <input type="number" id="storeCommission" class="minimal-input" placeholder="e.g. 10.5" min="0" max="100" step="any" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-group__label">Store Global Discount (%)</label>
+          <input type="number" id="storeDiscount" class="minimal-input" placeholder="e.g. 5" min="0" max="100" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-group__label">Display Order / Position (Optional)</label>
+          <input type="number" id="storeDisplayOrder" class="minimal-input" placeholder="e.g., 1 (lower numbers display first)" min="1" step="1" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-group__label">Focused Categories</label>
+          <div id="catCheckboxes"
+            style="display:grid; grid-template-columns: repeat(2, 1fr); gap:0.5rem; margin-top:0.5rem;">
+            <!-- JS Populated Categories -->
+          </div>
+        </div>
+
+        <div style="display:flex; gap:1rem; margin-top:1rem;">
+          <button type="button" class="btn-secondary" style="flex:1;" onclick="closeSellerModal()">Cancel</button>
+          <button type="submit" class="btn-primary" style="flex:1;">Save Seller</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══ Delete Confirmation Modal ═══ -->
+  <div class="modal-overlay" id="deleteModal" onclick="if(event.target===this) this.classList.remove('open')">
+    <div class="modal-content" style="max-width:24rem; border-radius:var(--radius-xl); padding:2rem;">
+      <h3 class="font-headline text-headline-sm" style="margin-bottom:0.5rem;">Remove Seller?</h3>
+      <p class="text-body-sm" style="color:var(--outline); margin-bottom:2rem;">This will disconnect any products
+        currently assigned to this seller.</p>
+      <div style="display:flex; gap:0.75rem;">
+        <button class="btn-secondary" style="flex:1;"
+          onclick="document.getElementById('deleteModal').classList.remove('open')">Cancel</button>
+        <button class="btn-danger" style="flex:1;" id="confirmDeleteBtn">Remove</button>
+      </div>
+    </div>
+  </div>
+
+  <nav class="bottom-nav-admin">
+    <a href="admin-dashboard.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined">dashboard</span>
+      <span>Stats</span>
+    </a>
+    <a href="admin-products.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined">inventory_2</span>
+      <span>Products</span>
+    </a>
+    <a href="admin-sellers.html" class="bottom-nav-admin__item active">
+      <span class="material-symbols-outlined filled">storefront</span>
+      <span>Sellers</span>
+    </a>
+    <a href="admin-orders.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined">receipt_long</span>
+      <span>Orders</span>
+    </a>
+  </nav>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="../store.js"></script>
+  <script src="../utils.js"></script>
+  <script type="module" src="../shell.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      if (typeof KwabzUtils !== 'undefined') {
+        KwabzUtils.requireAdmin();
+      }
+      renderCategorySelections();
+      renderSellers();
+
+      KwabzStore.on('sellers_changed', () => renderSellers());
+      KwabzStore.on('categories_changed', () => renderCategorySelections());
+      KwabzStore.on('orders_changed', () => renderSellers()); // Re-render sellers when orders change to update balances
+    });
+
+    let deleteTargetId = null;
+
+    function calculateSellerStats(sellerId) {
+      const orders = KwabzStore.getOrders() || [];
+      let totalSales = 0;
+
+      orders.forEach(order => {
+        if (order.status === 'cancelled' || order.status === 'refunded') return;
+        if (order.items) {
+          order.items.forEach(item => {
+            if (item.seller_id === sellerId) {
+              const itemPrice = typeof KwabzUtils !== 'undefined' ? KwabzUtils.calcDiscountedPrice(item.price, KwabzUtils.getEffectiveDiscount(item)) : item.price;
+              totalSales += (itemPrice * (item.quantity || 1));
+            }
+          });
+        }
+      });
+
+      const seller = KwabzStore.getSellerById(sellerId);
+      const commissionRate = seller ? (seller.commission || 0) : 0;
+      const commissionAmount = (totalSales * commissionRate) / 100;
+      const vendorBalance = totalSales - commissionAmount;
+
+      return { totalSales, commissionAmount, vendorBalance };
+    }
+
+    function generateWhatsAppLink(seller, commissionAmount) {
+      const phone = seller.whatsapp ? seller.whatsapp.toString().replace(/\D/g, '') : '';
+      if (!phone) return '#';
+
+      const message = `Hello ${seller.name},\n\nThis is Kwabz Store Admin. Your current commission due to Admin is GH₵ ${commissionAmount.toFixed(2)}.\n\nThank you for curating with us!`;
+      return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    }
+
+    async function toggleSellerVisibility(id, isVisible) {
+      try {
+        await KwabzStore.updateSeller(id, { hidden: !isVisible });
+        KwabzUtils.toast(`Store ${isVisible ? 'visible' : 'hidden'} successfully`);
+      } catch (err) {
+        KwabzUtils.toast('Failed to update visibility: ' + err.message, 'error');
+      }
+    }
+
+    let currentAdminTab = 'sellers';
+
+    function switchAdminTab(tab) {
+      currentAdminTab = tab;
+      const tabSellers = document.getElementById('tabSellers');
+      const tabServices = document.getElementById('tabServices');
+      
+      if (tab === 'sellers') {
+        tabSellers.style.background = 'var(--primary)';
+        tabSellers.style.color = 'var(--on-primary)';
+        tabServices.style.background = 'none';
+        tabServices.style.color = 'var(--outline)';
+        document.querySelector('.section-header').textContent = 'Mini-Store Directory';
+        document.querySelector('.text-body-sm').textContent = 'Manage independent sellers and their brand presence.';
+      } else {
+        tabServices.style.background = 'var(--primary)';
+        tabServices.style.color = 'var(--on-primary)';
+        tabSellers.style.background = 'none';
+        tabSellers.style.color = 'var(--outline)';
+        document.querySelector('.section-header').textContent = 'Service Providers Directory';
+        document.querySelector('.text-body-sm').textContent = 'Manage local professionals, service providers, and redirection portals.';
+      }
+      renderSellers();
+    }
+
+    function toggleTypeFields(type) {
+      const redirectGroup = document.getElementById('redirectGroup');
+      const professionGroup = document.getElementById('professionGroup');
+      const descLabel = document.getElementById('storeDescription').previousElementSibling;
+      const commissionGroup = document.getElementById('storeCommission').closest('.form-group');
+      const discountGroup = document.getElementById('storeDiscount').closest('.form-group');
+      const categoriesGroup = document.getElementById('catCheckboxes').closest('.form-group');
+      
+      if (type === 'service') {
+        redirectGroup.style.display = 'block';
+        professionGroup.style.display = 'block';
+        descLabel.textContent = 'About the Service (Short Bio)';
+        commissionGroup.style.display = 'none';
+        discountGroup.style.display = 'none';
+        categoriesGroup.style.display = 'none';
+      } else {
+        redirectGroup.style.display = 'none';
+        professionGroup.style.display = 'none';
+        descLabel.textContent = 'What they sell (Short Bio)';
+        commissionGroup.style.display = 'block';
+        discountGroup.style.display = 'block';
+        categoriesGroup.style.display = 'block';
+      }
+    }
+
+    function renderSellers() {
+      const allSellers = KwabzStore.getSellers() || [];
+      const sellers = allSellers.filter(s => {
+        if (currentAdminTab === 'sellers') {
+          return !s.type || s.type === 'seller';
+        } else {
+          return s.type === 'service';
+        }
+      });
+
+      const container = document.getElementById('sellerList');
+      const empty = document.getElementById('emptyState');
+      const count = document.getElementById('sellerCount');
+
+      count.textContent = `${sellers.length} ${currentAdminTab === 'sellers' ? 'SELLERS' : 'SERVICE PROVIDERS'}`;
+
+      if (sellers.length === 0) {
+        container.innerHTML = '';
+        empty.style.display = 'flex';
+        empty.querySelector('.empty-state__title').textContent = currentAdminTab === 'sellers' ? 'No Sellers Defined' : 'No Service Providers';
+        empty.querySelector('.empty-state__text').textContent = currentAdminTab === 'sellers' ? 'Start by adding independent curators to your store network.' : 'Add hairdressers, barbers, tutors, and other services to the network.';
+        empty.querySelector('button').textContent = currentAdminTab === 'sellers' ? 'Add First Seller' : 'Add First Service';
+        return;
+      }
+
+      empty.style.display = 'none';
+      container.innerHTML = sellers.map(s => {
+        if (currentAdminTab === 'sellers') {
+          const stats = calculateSellerStats(s.id);
+          const waLink = generateWhatsAppLink(s, stats.commissionAmount);
+
+          return `
+          <div class="data-list__item" style="padding:1.5rem; ${s.hidden ? 'opacity:0.6;' : ''}">
+            <img class="data-list__image" src="${s.image_url}" alt="${s.name}" style="border-radius:1rem; width:4rem; height:4rem; object-fit:cover;" onerror="this.src='https://via.placeholder.com/200?text=' + encodeURIComponent(s.name);" />
+            <div class="data-list__info" style="margin-left:1.5rem; flex:1;">
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <p class="font-headline" style="font-weight:700;font-size:1rem;">${s.name}</p>
+                <span style="font-size:0.65rem; background:var(--surface-container-high); color:var(--primary); padding:0.15rem 0.5rem; border-radius:0.5rem; font-weight:700;">Rank: ${typeof s.displayOrder === 'number' && s.displayOrder !== 9999 ? s.displayOrder : 'Unset'}</span>
+                ${s.hidden ? '<span style="font-size:0.65rem; background:var(--error); color:white; padding:0.1rem 0.4rem; border-radius:0.5rem;">HIDDEN</span>' : ''}
+              </div>
+              <p class="text-body-sm" style="color:var(--outline); margin-top:0.25rem;">${s.description}</p>
+              <p style="font-size:0.625rem; color:var(--primary); font-weight:700; margin-top:0.5rem; letter-spacing:0.05em;">
+                ${(s.categories || []).map(cid => KwabzStore.getCategoryById(cid)?.name).filter(Boolean).join(' • ') || 'ALL CATEGORIES'}
+              </p>
+              <div style="display:flex; gap:1rem; margin-top:0.75rem;">
+                <div style="background:var(--surface-container-low); padding:0.5rem 1rem; border-radius:0.5rem;">
+                  <p style="font-size:0.65rem; color:var(--outline); margin-bottom:0.1rem; text-transform:uppercase;">Gross Sales</p>
+                  <p style="font-size:0.875rem; font-weight:700;">GH₵ ${stats.totalSales.toFixed(2)}</p>
+                </div>
+                <div style="background:var(--surface-container-low); padding:0.5rem 1rem; border-radius:0.5rem;">
+                  <p style="font-size:0.65rem; color:var(--outline); margin-bottom:0.1rem; text-transform:uppercase;">Admin Comm (${s.commission || 0}%)</p>
+                  <p style="font-size:0.875rem; font-weight:700;">GH₵ ${stats.commissionAmount.toFixed(2)}</p>
+                </div>
+                <div style="background:var(--surface-container-low); padding:0.5rem 1rem; border-radius:0.5rem; border:1px solid var(--primary);">
+                  <p style="font-size:0.65rem; color:var(--primary); margin-bottom:0.1rem; text-transform:uppercase;">Balance Owed</p>
+                  <p style="font-size:0.875rem; font-weight:700; color:var(--primary);">GH₵ ${stats.vendorBalance.toFixed(2)}</p>
+                </div>
+              </div>
+            </div>
+            <div class="data-list__actions" style="display:flex; flex-direction:column; align-items:flex-end; gap:0.5rem;">
+              <div style="display:flex; gap:0.5rem;">
+                <a href="admin-add-product.html?seller_id=${s.id}" class="btn-icon" title="Add Product to Store">
+                  <span class="material-symbols-outlined" style="color:var(--primary);">add_box</span>
+                </a>
+                <button class="btn-icon" onclick="openSellerModal('${s.id}')" title="Edit Store">
+                  <span class="material-symbols-outlined">edit</span>
+                </button>
+                <button class="btn-icon" onclick="confirmDeleteSeller('${s.id}')" title="Delete Store">
+                  <span class="material-symbols-outlined" style="color:var(--error);">delete</span>
+                </button>
+              </div>
+              <div style="display:flex; gap:0.5rem; align-items:center;">
+                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; font-size:0.75rem; font-weight:600; color:var(--outline);">
+                  Visibility
+                  <input type="checkbox" onchange="toggleSellerVisibility('${s.id}', this.checked)" ${s.hidden ? '' : 'checked'} style="accent-color:var(--primary); transform:scale(1.2);">
+                </label>
+                ${s.whatsapp ? `
+                <a href="${waLink}" target="_blank" class="btn-primary" style="display:flex; align-items:center; gap:0.25rem; padding:0.25rem 0.75rem; border-radius:1rem; font-size:0.75rem; text-decoration:none; background:#25D366; color:white;">
+                  <span class="material-symbols-outlined" style="font-size:1rem;">chat</span> Notify
+                </a>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+          `;
+        } else {
+          return `
+          <div class="data-list__item" style="padding:1.5rem; ${s.hidden ? 'opacity:0.6;' : ''}">
+            <img class="data-list__image" src="${s.image_url}" alt="${s.name}" style="border-radius:1rem; width:4rem; height:4rem; object-fit:cover;" onerror="this.src='https://via.placeholder.com/200?text=' + encodeURIComponent(s.name);" />
+            <div class="data-list__info" style="margin-left:1.5rem; flex:1;">
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <p class="font-headline" style="font-weight:700;font-size:1rem;">${s.name}</p>
+                <span style="font-size:0.65rem; background:var(--surface-container-high); color:var(--primary); padding:0.15rem 0.5rem; border-radius:0.5rem; font-weight:700;">Rank: ${typeof s.displayOrder === 'number' && s.displayOrder !== 9999 ? s.displayOrder : 'Unset'}</span>
+                ${s.profession ? `<span style="font-size:0.65rem; background:var(--primary); color:white; padding:0.15rem 0.5rem; border-radius:0.5rem; font-weight:700;">${s.profession}</span>` : ''}
+                ${s.hidden ? '<span style="font-size:0.65rem; background:var(--error); color:white; padding:0.1rem 0.4rem; border-radius:0.5rem;">HIDDEN</span>' : ''}
+              </div>
+              <p class="text-body-sm" style="color:var(--outline); margin-top:0.25rem;">${s.description}</p>
+              ${s.redirect_url ? `
+              <div style="margin-top:0.5rem; display:flex; align-items:center; gap:0.25rem;">
+                <span class="material-symbols-outlined" style="font-size:0.875rem; color:var(--primary);">link</span>
+                <a href="${s.redirect_url}" target="_blank" style="font-size:0.75rem; color:var(--primary); font-weight:600; text-decoration:none; word-break:break-all;">${s.redirect_url}</a>
+              </div>
+              ` : '<p style="font-size:0.75rem; color:var(--outline); font-style:italic; margin-top:0.5rem;">No booking URL set</p>'}
+            </div>
+            <div class="data-list__actions" style="display:flex; flex-direction:column; align-items:flex-end; gap:0.5rem;">
+              <div style="display:flex; gap:0.5rem;">
+                <button class="btn-icon" onclick="openSellerModal('${s.id}')" title="Edit Service">
+                  <span class="material-symbols-outlined">edit</span>
+                </button>
+                <button class="btn-icon" onclick="confirmDeleteSeller('${s.id}')" title="Delete Service">
+                  <span class="material-symbols-outlined" style="color:var(--error);">delete</span>
+                </button>
+              </div>
+              <div style="display:flex; gap:0.5rem; align-items:center;">
+                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; font-size:0.75rem; font-weight:600; color:var(--outline);">
+                  Visibility
+                  <input type="checkbox" onchange="toggleSellerVisibility('${s.id}', this.checked)" ${s.hidden ? '' : 'checked'} style="accent-color:var(--primary); transform:scale(1.2);">
+                </label>
+                ${s.whatsapp ? `
+                <a href="https://wa.me/${s.whatsapp.toString().replace(/\D/g, '')}" target="_blank" class="btn-primary" style="display:flex; align-items:center; gap:0.25rem; padding:0.25rem 0.75rem; border-radius:1rem; font-size:0.75rem; text-decoration:none; background:#25D366; color:white;">
+                  <span class="material-symbols-outlined" style="font-size:1rem;">chat</span> Chat
+                </a>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+          `;
+        }
+      }).join('');
+    }
+
+    function renderCategorySelections() {
+      const cats = KwabzStore.getCategories();
+      const container = document.getElementById('catCheckboxes');
+      container.innerHTML = cats.map(c => `
+        <label style="display:flex; align-items:center; gap:0.5rem; font-size:0.75rem; cursor:pointer;">
+          <input type="checkbox" name="categories" value="${c.id}" />
+          ${c.name}
+        </label>
+      `).join('');
+    }
+
+    let logoDataUrl = '';
+    let heroDataUrl = '';
+
+    async function handleLogoUpload(input) {
+      const file = input.files[0];
+      if (!file) return;
+
+      if (file.size > 5 * 1024 * 1024) {
+        KwabzUtils.toast('Logo image must be under 5MB', 'error');
+        return;
+      }
+
+      try {
+        logoDataUrl = await KwabzUtils.fileToDataURL(file);
+        showLogoPreview(logoDataUrl);
+        document.getElementById('storeLogo').value = '';
+      } catch (err) {
+        KwabzUtils.toast('Failed to load logo image', 'error');
+      }
+    }
+
+    function handleLogoUrl(url) {
+      if (url.trim()) {
+        logoDataUrl = url.trim();
+        showLogoPreview(url.trim());
+      } else {
+        logoDataUrl = '';
+        document.getElementById('logoPreview').style.display = 'none';
+        document.getElementById('logoUploadIcon').style.display = 'block';
+        document.getElementById('logoUploadText').style.display = 'block';
+      }
+    }
+
+    function showLogoPreview(src) {
+      const preview = document.getElementById('logoPreview');
+      preview.src = src;
+      preview.style.display = 'block';
+      document.getElementById('logoUploadIcon').style.display = 'none';
+      document.getElementById('logoUploadText').style.display = 'none';
+    }
+
+    async function handleHeroUpload(input) {
+      const file = input.files[0];
+      if (!file) return;
+
+      if (file.size > 5 * 1024 * 1024) {
+        KwabzUtils.toast('Hero image must be under 5MB', 'error');
+        return;
+      }
+
+      try {
+        heroDataUrl = await KwabzUtils.fileToDataURL(file);
+        showHeroPreview(heroDataUrl);
+        document.getElementById('storeHero').value = '';
+      } catch (err) {
+        KwabzUtils.toast('Failed to load hero image', 'error');
+      }
+    }
+
+    function handleHeroUrl(url) {
+      if (url.trim()) {
+        heroDataUrl = url.trim();
+        showHeroPreview(url.trim());
+      } else {
+        heroDataUrl = '';
+        document.getElementById('heroPreview').style.display = 'none';
+        document.getElementById('heroUploadIcon').style.display = 'block';
+        document.getElementById('heroUploadText').style.display = 'block';
+      }
+    }
+
+    function showHeroPreview(src) {
+      const preview = document.getElementById('heroPreview');
+      preview.src = src;
+      preview.style.display = 'block';
+      document.getElementById('heroUploadIcon').style.display = 'none';
+      document.getElementById('heroUploadText').style.display = 'none';
+    }
+
+    function openSellerModal(sellerId = null) {
+      const modal = document.getElementById('sellerModal');
+      const form = document.getElementById('sellerForm');
+      form.reset();
+
+      // Reset upload previews
+      logoDataUrl = '';
+      heroDataUrl = '';
+      document.getElementById('logoPreview').style.display = 'none';
+      document.getElementById('logoPreview').src = '';
+      document.getElementById('logoUploadIcon').style.display = 'block';
+      document.getElementById('logoUploadText').style.display = 'block';
+
+      document.getElementById('heroPreview').style.display = 'none';
+      document.getElementById('heroPreview').src = '';
+      document.getElementById('heroUploadIcon').style.display = 'block';
+      document.getElementById('heroUploadText').style.display = 'block';
+
+      const seller = sellerId ? KwabzStore.getSellerById(sellerId) : null;
+
+      if (seller) {
+        document.getElementById('modalTitle').textContent = seller.type === 'service' ? 'Edit Service Provider' : 'Edit Mini-Store';
+        document.getElementById('editSellerId').value = seller.id;
+        document.getElementById('storeName').value = seller.name;
+        document.getElementById('storeType').value = seller.type || 'seller';
+        document.getElementById('storeDescription').value = seller.description || '';
+        document.getElementById('storeWhatsapp').value = seller.whatsapp || '';
+        document.getElementById('storeCommission').value = seller.commission || '';
+        document.getElementById('storeDiscount').value = seller.discount || '';
+        document.getElementById('storeRedirectUrl').value = seller.redirect_url || '';
+        document.getElementById('storeProfession').value = seller.profession || '';
+        document.getElementById('storeDisplayOrder').value = (typeof seller.displayOrder === 'number' && seller.displayOrder !== 9999) ? seller.displayOrder : '';
+
+        if (seller.image_url) {
+          logoDataUrl = seller.image_url;
+          showLogoPreview(seller.image_url);
+          document.getElementById('storeLogo').value = seller.image_url;
+        }
+
+        if (seller.hero_url) {
+          heroDataUrl = seller.hero_url;
+          showHeroPreview(seller.hero_url);
+          document.getElementById('storeHero').value = seller.hero_url;
+        }
+
+        const checks = form.querySelectorAll('input[type="checkbox"]');
+        checks.forEach(ch => {
+          if (seller.categories && seller.categories.includes(ch.value)) ch.checked = true;
+        });
+        
+        toggleTypeFields(seller.type || 'seller');
+      } else {
+        document.getElementById('modalTitle').textContent = currentAdminTab === 'services' ? 'New Service Provider' : 'New Mini-Store';
+        document.getElementById('editSellerId').value = '';
+        document.getElementById('storeDisplayOrder').value = '';
+        document.getElementById('storeType').value = currentAdminTab === 'services' ? 'service' : 'seller';
+        document.getElementById('storeRedirectUrl').value = '';
+        document.getElementById('storeProfession').value = '';
+        
+        toggleTypeFields(currentAdminTab === 'services' ? 'service' : 'seller');
+      }
+
+      modal.classList.add('open');
+    }
+
+    function closeSellerModal() {
+      document.getElementById('sellerModal').classList.remove('open');
+    }
+
+    async function handleSellerSubmit(e) {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"]');
+      if (btn.disabled) return;
+
+      const originalText = btn.textContent;
+      const id = document.getElementById('editSellerId').value;
+      const name = document.getElementById('storeName').value.trim();
+
+      if (!name) {
+        KwabzUtils.toast('Store name is required', 'error');
+        return;
+      }
+
+      if (!logoDataUrl) {
+        KwabzUtils.toast('Store logo is required', 'error');
+        return;
+      }
+
+      const rawOrder = document.getElementById('storeDisplayOrder').value;
+      const data = {
+        name: name,
+        type: document.getElementById('storeType').value,
+        image_url: logoDataUrl,
+        hero_url: heroDataUrl,
+        description: document.getElementById('storeDescription').value.trim(),
+        whatsapp: document.getElementById('storeWhatsapp').value.trim(),
+        commission: parseFloat(document.getElementById('storeCommission').value) || 0,
+        discount: parseFloat(document.getElementById('storeDiscount').value) || 0,
+        redirect_url: document.getElementById('storeRedirectUrl').value.trim(),
+        profession: document.getElementById('storeProfession').value.trim(),
+        displayOrder: rawOrder ? parseInt(rawOrder, 10) : 9999,
+        categories: Array.from(document.querySelectorAll('input[name="categories"]:checked')).map(cb => cb.value)
+      };
+
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+
+        if (id) {
+          await KwabzStore.updateSeller(id, data);
+          KwabzUtils.toast('Seller updated successfully');
+        } else {
+          await KwabzStore.addSeller(data);
+          KwabzUtils.toast('Seller added successfully');
+        }
+        closeSellerModal();
+      } catch (err) {
+        console.error(err);
+        KwabzUtils.toast('Save failed: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+
+    function confirmDeleteSeller(id) {
+      deleteTargetId = id;
+      document.getElementById('deleteModal').classList.add('open');
+    }
+
+    document.getElementById('confirmDeleteBtn').addEventListener('click', async (e) => {
+      if (deleteTargetId) {
+        const btn = e.currentTarget;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Removing...';
+
+        try {
+          await KwabzStore.deleteSeller(deleteTargetId);
+          KwabzUtils.toast('Seller removed successfully');
+          deleteTargetId = null;
+          document.getElementById('deleteModal').classList.remove('open');
+        } catch (err) {
+          KwabzUtils.toast('Remove failed: ' + err.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      }
+    });
+
+    // Init handled by DOMContentLoaded above
+  </script>
+</body>
+
+</html>

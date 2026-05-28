@@ -1,12 +1,10 @@
-import express from 'express';
-import cors from 'cors';
+import Fastify from 'fastify';
+import fastifyCors from '@fastify/cors';
+import fastifyCompress from '@fastify/compress';
 import dotenv from 'dotenv';
 import admin from 'firebase-admin';
-import { createServer } from 'http';
 import { Server } from 'socket.io';
 import fs from 'fs';
-import path from 'path';
-import { createClient } from 'redis';
 
 // Load Config
 dotenv.config();
@@ -14,576 +12,356 @@ dotenv.config();
 const PORT = process.env.PORT || 5000;
 const SERVICE_ACCOUNT_PATH = process.env.FIREBASE_SERVICE_ACCOUNT || './firebase-service-account.json';
 
-const app = express();
-app.use(cors({ origin: '*' }));
-app.use(express.json());
+// ── Fastify Instance ──────────────────────────────────────────
+const fastify = Fastify({ trustProxy: true });
 
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
+// ── Speed Plugins ─────────────────────────────────────────────
+await fastify.register(fastifyCompress, { global: true });
+await fastify.register(fastifyCors, { origin: '*' });
+
+// ── X-Response-Time ───────────────────────────────────────────
+fastify.addHook('onRequest', (req, reply, done) => { req._t = Date.now(); done(); });
+fastify.addHook('onSend', (req, reply, payload, done) => {
+  reply.header('X-Response-Time', `${Date.now() - req._t}ms`);
+  done(null, payload);
+});
+
+// ── Socket.IO (uses Fastify's underlying http.Server) ─────────
+const io = new Server(fastify.server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
   pingInterval: 25000,
   pingTimeout: 20000
 });
 
+// ── Firebase Admin ────────────────────────────────────────────
 let db = null;
 let isFirebaseOnline = false;
 
 try {
   let serviceAccount = null;
-
-  // 1. Prioritize raw JSON string from Production Environment Variables
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    console.log('📦 Loading Firebase Service Account from Environment Variable...');
+    console.log('📦 Loading Firebase from Environment Variable...');
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-  } 
-  // 2. Fall back to local file if available
-  else if (fs.existsSync(SERVICE_ACCOUNT_PATH)) {
-    console.log('📂 Loading Firebase Service Account from local file...');
+  } else if (fs.existsSync(SERVICE_ACCOUNT_PATH)) {
+    console.log('📂 Loading Firebase from local file...');
     serviceAccount = JSON.parse(fs.readFileSync(SERVICE_ACCOUNT_PATH, 'utf8'));
   }
-
   if (serviceAccount) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
     db = admin.firestore();
     isFirebaseOnline = true;
-    console.log('✅ Firebase Admin connected successfully in backend.');
+    console.log('✅ Firebase Admin connected successfully.');
   } else {
-    console.warn('⚠️  No Firebase Service Account provided (File missing and Env Var empty).');
-    console.warn('👉 Add FIREBASE_SERVICE_ACCOUNT_JSON to your Render Environment Variables.');
+    console.warn('⚠️  No Firebase Service Account found. Add FIREBASE_SERVICE_ACCOUNT_JSON env var.');
   }
 } catch (err) {
-  console.error('❌ Firebase connection error in backend:', err.message);
-  console.warn('⚠️  Falling back to Mock/Preview mode.');
+  console.error('❌ Firebase error:', err.message);
 }
 
-// ─── Mock Fallbacks (Prevent server crashes if offline) ──────
+// ── Mock Fallbacks ────────────────────────────────────────────
 const mockData = {
-  products: [],
-  categories: [],
-  sellers: [],
+  products: [], categories: [], sellers: [],
   settings: { theme: { primary: '#6200ee' } }
 };
 
-// ─── In-Memory Server Cache ──────────────────────────────────
+// ── In-Memory Cache ───────────────────────────────────────────
 const cache = {
-  products: [],
-  categories: [],
-  sellers: [],
-  orders: [],
-  settings: {},
-  reviews: {} // productId -> reviews array
+  products: [], categories: [], sellers: [],
+  orders: [], settings: {}, reviews: {}
 };
 
-// ─── Initialize Redis client (Optional cache backend) ─────────
-const REDIS_URL = process.env.REDIS_URL;
-let redisClient = null;
-let isRedisOnline = false;
+// Pre-serialized JSON strings — set once on Firestore update, served instantly on every request
+const serialized = { products: '[]', categories: '[]', sellers: '[]', orders: '[]', settings: '{}' };
+const etags = { products: null, categories: null, sellers: null, orders: null, settings: null };
 
-if (REDIS_URL) {
-  try {
-    console.log('📡 Attempting to connect to Redis cache backend...');
-    redisClient = createClient({ url: REDIS_URL });
-    
-    redisClient.on('error', (err) => {
-      console.warn('⚠️  Redis Client Error:', err.message);
-      isRedisOnline = false;
-    });
-    
-    redisClient.on('connect', () => {
-      console.log('✅ Connected to Redis cache backend successfully.');
-      isRedisOnline = true;
-    });
-
-    await redisClient.connect();
-  } catch (err) {
-    console.warn('⚠️  Redis connection failed. Falling back to local memory cache.', err.message);
-    isRedisOnline = false;
-  }
-} else {
-  console.log('ℹ️  No REDIS_URL configured. Using local in-memory store.');
+function updateCache(key, value) {
+  const json = JSON.stringify(value);
+  const ts = Date.now().toString(36);
+  if      (key === 'products')   { cache.products   = value; serialized.products   = json; etags.products   = ts; }
+  else if (key === 'categories') { cache.categories = value; serialized.categories = json; etags.categories = ts; }
+  else if (key === 'sellers')    { cache.sellers    = value; serialized.sellers    = json; etags.sellers    = ts; }
+  else if (key === 'orders')     { cache.orders     = value; serialized.orders     = json; etags.orders     = ts; }
+  else if (key === 'settings')   { cache.settings   = value; serialized.settings   = json; etags.settings   = ts; }
 }
 
-// ─── Redis & local Cache Helpers ──────────────────────────────
+function setReviewCache(id, value) { cache.reviews[id] = { data: value, ts: Date.now() }; }
+function getReviewCache(id) {
+  const e = cache.reviews[id];
+  return (e && Date.now() - e.ts < 5 * 60 * 1000) ? e.data : null;
+}
+
+async function setCacheValue(key, value) {
+  const k = key.replace('kwabz:', '');
+  k.startsWith('reviews:') ? setReviewCache(k.replace('reviews:', ''), value) : updateCache(k, value);
+}
+async function getCacheValue(key, fallback) {
+  const k = key.replace('kwabz:', '');
+  if (k.startsWith('reviews:')) return getReviewCache(k.replace('reviews:', '')) ?? fallback;
+  return cache[k] ?? fallback;
+}
 const cacheKeys = {
-  products: 'kwabz:products',
-  categories: 'kwabz:categories',
-  sellers: 'kwabz:sellers',
-  orders: 'kwabz:orders',
-  settings: 'kwabz:settings',
-  reviews: (productId) => `kwabz:reviews:${productId}`
+  products: 'kwabz:products', categories: 'kwabz:categories',
+  sellers: 'kwabz:sellers', orders: 'kwabz:orders',
+  settings: 'kwabz:settings', reviews: (id) => `kwabz:reviews:${id}`
 };
 
-async function setCacheValue(key, value, ttlSeconds = null) {
-  // Always update our local memory cache as local fallback
-  if (key === cacheKeys.products) cache.products = value;
-  else if (key === cacheKeys.categories) cache.categories = value;
-  else if (key === cacheKeys.sellers) cache.sellers = value;
-  else if (key === cacheKeys.orders) cache.orders = value;
-  else if (key === cacheKeys.settings) cache.settings = value;
-  else if (key.startsWith('kwabz:reviews:')) {
-    const prodId = key.replace('kwabz:reviews:', '');
-    cache.reviews[prodId] = { data: value, ts: Date.now() };
+// ── Fast JSON Responder (pre-serialized + ETag) ───────────────
+function sendCached(req, reply, key, fallback = '[]') {
+  const etag = etags[key];
+  if (etag) {
+    reply.header('ETag', `"${etag}"`);
+    if (req.headers['if-none-match'] === `"${etag}"`) return reply.code(304).send();
   }
-
-  // Update Redis if online
-  if (isRedisOnline && redisClient) {
-    try {
-      const dataStr = JSON.stringify(value);
-      if (ttlSeconds) {
-        await redisClient.set(key, dataStr, { EX: ttlSeconds });
-      } else {
-        await redisClient.set(key, dataStr);
-      }
-    } catch (err) {
-      console.warn(`[Redis Cache] Write failed for key: ${key}`, err.message);
-    }
-  }
+  reply.header('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
+  return reply.type('application/json').send(serialized[key] || fallback);
 }
 
-async function getCacheValue(key, fallbackLocalValue) {
-  if (isRedisOnline && redisClient) {
-    try {
-      const data = await redisClient.get(key);
-      if (data) {
-        return JSON.parse(data);
-      }
-    } catch (err) {
-      console.warn(`[Redis Cache] Read failed for key: ${key}`, err.message);
-    }
-  }
-  return fallbackLocalValue;
-}
-
-// ─── Visitor Registry (Managed 100% in server memory!) ───────
-// Key: visitorId, Value: { uid, page, lastActive, displayName }
+// ── Visitor Registry ──────────────────────────────────────────
 const activeVisitors = new Map();
 
-// Helper to get safe numeric timestamp
 function getSafeTime(val) {
   if (!val) return 0;
-  if (typeof val.toDate === 'function') {
-    try { return val.toDate().getTime(); } catch (e) { return 0; }
-  }
+  if (typeof val.toDate === 'function') { try { return val.toDate().getTime(); } catch { return 0; } }
   if (typeof val === 'number') return val;
   if (val.seconds) return val.seconds * 1000;
-  const t = new Date(val).getTime();
-  return isNaN(t) ? 0 : t;
+  const t = new Date(val).getTime(); return isNaN(t) ? 0 : t;
 }
 
-// ─── background live-sync listeners (exactly 1 read path per server process) ───
-let unsubscribers = {
-  products: null,
-  categories: null,
-  sellers: null,
-  settings: null
-};
-
-function setupBackgroundSync() {
-  if (!isFirebaseOnline || !db) {
-    console.warn('⚠️  Mock data fallback enabled (Database offline).');
-    return;
-  }
-
-  console.log('🔄 Setting up background Firestore Live-Sync listeners...');
-
-  // 1. Live Products Listener
-  unsubscribers.products = db.collection('products')
-    .onSnapshot(async snapshot => {
-      console.log(`[Firestore Sync] products collection updated. Syncing ${snapshot.size} items.`);
-      const products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // In-memory sort by created_at desc
-      products.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
-      await setCacheValue(cacheKeys.products, products);
-      // Broadcast real-time change to all connected socket clients (0 Firestore read cost!)
-      io.emit('products_changed', cache.products);
-    }, err => {
-      console.error('[Firestore Sync] Products snapshot failed:', err.message);
-    });
-
-  // 2. Live Categories Listener
-  unsubscribers.categories = db.collection('categories')
-    .onSnapshot(async snapshot => {
-      console.log(`[Firestore Sync] categories collection updated. Syncing ${snapshot.size} items.`);
-      const categories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      await setCacheValue(cacheKeys.categories, categories);
-      io.emit('categories_changed', cache.categories);
-    }, err => {
-      console.error('[Firestore Sync] Categories snapshot failed:', err.message);
-    });
-
-  // 3. Live Sellers Listener
-  unsubscribers.sellers = db.collection('sellers')
-    .onSnapshot(async snapshot => {
-      console.log(`[Firestore Sync] sellers collection updated. Syncing ${snapshot.size} items.`);
-      const sellers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      await setCacheValue(cacheKeys.sellers, sellers);
-      io.emit('sellers_changed', cache.sellers);
-    }, err => {
-      console.error('[Firestore Sync] Sellers snapshot failed:', err.message);
-    });
-
-  // 3.5. Live Orders Listener (for Admin Dashboard)
-  unsubscribers.orders = db.collection('orders')
-    .orderBy('created_at', 'desc')
-    .limit(200)
-    .onSnapshot(async snapshot => {
-      console.log(`[Firestore Sync] orders collection updated. Syncing ${snapshot.size} items.`);
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      await setCacheValue(cacheKeys.orders, orders);
-      io.emit('orders_changed', cache.orders);
-    }, err => {
-      console.error('[Firestore Sync] Orders snapshot failed:', err.message);
-    });
-
-  // 4. Live Settings Document Listener
-  unsubscribers.settings = db.collection('settings').doc('global')
-    .onSnapshot(async doc => {
-      if (doc.exists) {
-        console.log('[Firestore Sync] Global Settings document updated.');
-        await setCacheValue(cacheKeys.settings, doc.data());
-        io.emit('settings_changed', cache.settings);
-      }
-    }, err => {
-      console.error('[Firestore Sync] Settings snapshot failed:', err.message);
-    });
-}
-
-// ─── Memory Visitor Heartbeat Sweep Task ─────────────────────
-// Sweeps the visitor registry every 30 seconds and removes any inactive past 15 minutes.
-setInterval(() => {
+function getActiveAdminsCount() {
+  const threshold = 15 * 60 * 1000;
   const now = Date.now();
-  const threshold = 15 * 60 * 1000; // 15 mins
-  let changed = false;
+  return Array.from(activeVisitors.values()).filter(v => 
+    (now - v.lastActive < threshold) && 
+    (v.page && v.page.includes('admin') || v.uid && ['admin@kwabzstore.com', 'admin@kwabz.com', 'kelvin@kwabz.com'].includes(v.displayName))
+  ).length;
+}
 
-  for (const [key, value] of activeVisitors.entries()) {
-    if (now - value.lastActive > threshold) {
-      activeVisitors.delete(key);
-      changed = true;
-      console.log(`🧹 Visitor timed out: ${key}`);
-    }
+// Sweep inactive visitors every 30s
+setInterval(() => {
+  const threshold = 15 * 60 * 1000;
+  let changed = false;
+  let adminsChanged = false;
+  const prevAdminsCount = getActiveAdminsCount();
+
+  for (const [k, v] of activeVisitors.entries()) {
+    if (Date.now() - v.lastActive > threshold) { activeVisitors.delete(k); changed = true; }
   }
 
   if (changed) {
-    // Notify all connected dashboard clients of updated visitor count in real time
     io.emit('visitor_count_updated', activeVisitors.size);
+    if (getActiveAdminsCount() !== prevAdminsCount) {
+      io.emit('admin_presence_updated', getActiveAdminsCount());
+    }
   }
 }, 30000);
 
-// ─── REST API Routes ──────────────────────────────────────────
+// ── Firestore Background Sync ─────────────────────────────────
+const unsubscribers = { products: null, categories: null, sellers: null, settings: null, orders: null };
 
-// 0. Professional Status Landing Page
-app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Kwabz Store API — Online</title>
-      <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-          background: #0f172a;
-          color: #f8fafc;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 100vh;
-          margin: 0;
-          text-align: center;
-        }
-        .container {
-          background: #1e293b;
-          padding: 2.5rem;
-          border-radius: 16px;
-          box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-          max-width: 480px;
-          border: 1px solid #334155;
-        }
-        .icon {
-          font-size: 3rem;
-          margin-bottom: 1rem;
-          display: inline-block;
-          animation: pulse 2s infinite ease-in-out;
-        }
-        h1 {
-          font-size: 1.5rem;
-          margin: 0 0 0.5rem 0;
-          color: #38bdf8;
-        }
-        p {
-          color: #94a3b8;
-          font-size: 0.875rem;
-          line-height: 1.5;
-          margin: 0 0 1.5rem 0;
-        }
-        .badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.5rem;
-          background: #166534;
-          color: #4ade80;
-          font-weight: bold;
-          font-size: 0.75rem;
-          padding: 0.35rem 0.75rem;
-          border-radius: 9999px;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
-        .pulse-dot {
-          width: 8px;
-          height: 8px;
-          background: #4ade80;
-          border-radius: 50%;
-          display: inline-block;
-          box-shadow: 0 0 8px #4ade80;
-          animation: blink 1.5s infinite;
-        }
-        @keyframes pulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.1); }
-        }
-        @keyframes blink {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 1; }
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="icon">🚀</div>
-        <h1>Kwabz Store API</h1>
-        <p>Your custom high-performance Node.js caching & optimization server is fully operational and syncing with Cloud Firestore in the background.</p>
-        <span class="badge"><span class="pulse-dot"></span> Server Online</span>
-      </div>
-    </body>
-    </html>
-  `);
+function setupBackgroundSync() {
+  if (!isFirebaseOnline || !db) { console.warn('⚠️  Mock mode — DB offline.'); return; }
+  console.log('🔄 Starting Firestore Live-Sync listeners...');
+
+  unsubscribers.products = db.collection('products').onSnapshot(async snap => {
+    const p = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    p.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
+    await setCacheValue(cacheKeys.products, p);
+    io.emit('products_changed', cache.products);
+    console.log(`[Sync] products: ${p.length} items`);
+  }, e => console.error('[Sync] products error:', e.message));
+
+  unsubscribers.categories = db.collection('categories').onSnapshot(async snap => {
+    const c = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    await setCacheValue(cacheKeys.categories, c);
+    io.emit('categories_changed', cache.categories);
+  }, e => console.error('[Sync] categories error:', e.message));
+
+  unsubscribers.sellers = db.collection('sellers').onSnapshot(async snap => {
+    const s = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    await setCacheValue(cacheKeys.sellers, s);
+    io.emit('sellers_changed', cache.sellers);
+  }, e => console.error('[Sync] sellers error:', e.message));
+
+  unsubscribers.orders = db.collection('orders').orderBy('created_at', 'desc').limit(200)
+    .onSnapshot(async snap => {
+      const o = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      await setCacheValue(cacheKeys.orders, o);
+      io.emit('orders_changed', cache.orders);
+    }, e => console.error('[Sync] orders error:', e.message));
+
+  unsubscribers.settings = db.collection('settings').doc('global').onSnapshot(async doc => {
+    if (doc.exists) {
+      await setCacheValue(cacheKeys.settings, doc.data());
+      io.emit('settings_changed', cache.settings);
+    }
+  }, e => console.error('[Sync] settings error:', e.message));
+}
+
+// ── Routes ────────────────────────────────────────────────────
+
+// 0. Status Landing Page
+fastify.get('/', async (req, reply) => {
+  reply.type('text/html').send(`<!DOCTYPE html><html lang="en"><head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Kwabz Store API — Online</title>
+    <style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0f172a;color:#f8fafc;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center}.c{background:#1e293b;padding:2.5rem;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.3);max-width:480px;border:1px solid #334155}.icon{font-size:3rem;display:inline-block;animation:pulse 2s infinite ease-in-out}h1{font-size:1.5rem;margin:0 0 .5rem;color:#38bdf8}p{color:#94a3b8;font-size:.875rem;line-height:1.5;margin:0 0 1.5rem}.badge{display:inline-flex;align-items:center;gap:.5rem;background:#166534;color:#4ade80;font-weight:700;font-size:.75rem;padding:.35rem .75rem;border-radius:9999px;text-transform:uppercase;letter-spacing:.05em}.dot{width:8px;height:8px;background:#4ade80;border-radius:50%;display:inline-block;box-shadow:0 0 8px #4ade80;animation:blink 1.5s infinite}@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}@keyframes blink{0%,100%{opacity:.3}50%{opacity:1}}</style>
+    </head><body><div class="c"><div class="icon">⚡</div><h1>Kwabz Store API</h1>
+    <p>Powered by <strong>Fastify</strong> — 3× faster than Express. Real-time Socket.IO push active.</p>
+    <span class="badge"><span class="dot"></span> Server Online</span></div></body></html>`);
 });
 
 // 1. Healthcheck
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    firebase: isFirebaseOnline ? 'connected' : 'fallback_mock',
-    cacheSizes: {
-      products: cache.products.length,
-      categories: cache.categories.length,
-      sellers: cache.sellers.length
-    },
-    activeVisitors: activeVisitors.size
-  });
+fastify.get('/api/health', async (req, reply) => ({
+  status: 'healthy',
+  framework: 'Fastify',
+  firebase: isFirebaseOnline ? 'connected' : 'fallback_mock',
+  cacheSizes: { products: cache.products.length, categories: cache.categories.length, sellers: cache.sellers.length },
+  activeVisitors: activeVisitors.size,
+  activeAdmins: getActiveAdminsCount()
+}));
+
+// 2. Products — served from pre-serialized string, sub-millisecond
+fastify.get('/api/products', (req, reply) => {
+  if (cache.products.length > 0) return sendCached(req, reply, 'products');
+  reply.header('Cache-Control', 'no-store'); return reply.send(mockData.products);
 });
 
-// 2. Fetch Products (Serves instantly from memory cache!)
-app.get('/api/products', (req, res) => {
-  res.json(cache.products.length > 0 ? cache.products : mockData.products);
+// 3. Categories
+fastify.get('/api/categories', (req, reply) => {
+  if (cache.categories.length > 0) return sendCached(req, reply, 'categories');
+  reply.header('Cache-Control', 'no-store'); return reply.send(mockData.categories);
 });
 
-// 3. Fetch Categories
-app.get('/api/categories', (req, res) => {
-  res.json(cache.categories.length > 0 ? cache.categories : mockData.categories);
+// 4. Sellers
+fastify.get('/api/sellers', (req, reply) => {
+  if (cache.sellers.length > 0) return sendCached(req, reply, 'sellers');
+  reply.header('Cache-Control', 'no-store'); return reply.send(mockData.sellers);
 });
 
-// 4. Fetch Sellers
-app.get('/api/sellers', (req, res) => {
-  res.json(cache.sellers.length > 0 ? cache.sellers : mockData.sellers);
+// 5. Settings
+fastify.get('/api/settings', (req, reply) => {
+  if (Object.keys(cache.settings).length > 0) return sendCached(req, reply, 'settings', '{}');
+  reply.header('Cache-Control', 'no-store'); return reply.send(mockData.settings);
 });
 
-// 5. Fetch Settings
-app.get('/api/settings', (req, res) => {
-  res.json(Object.keys(cache.settings).length > 0 ? cache.settings : mockData.settings);
-});
-
-// 6. Visitor Heartbeat Endpoint (COMPLETELY replaces Firestore visitor database writes!)
-app.post('/api/visitors/heartbeat', (req, res) => {
-  const { visitorId, uid, page, displayName } = req.body;
-  if (!visitorId) {
-    return res.status(400).json({ error: 'visitorId is required' });
-  }
-
+// 6. Visitor Heartbeat
+fastify.post('/api/visitors/heartbeat', async (req, reply) => {
+  const { visitorId, uid, page, displayName } = req.body || {};
+  if (!visitorId) return reply.code(400).send({ error: 'visitorId is required' });
   const prevSize = activeVisitors.size;
-  activeVisitors.set(visitorId, {
-    uid: uid || null,
-    page: page || 'index.html',
-    displayName: displayName || null,
-    lastActive: Date.now()
+  const prevAdminsCount = getActiveAdminsCount();
+
+  activeVisitors.set(visitorId, { 
+    uid: uid || null, 
+    page: page || 'index.html', 
+    displayName: displayName || null, 
+    lastActive: Date.now() 
   });
 
-  // If visitor count changed, notify sockets
   if (activeVisitors.size !== prevSize) {
     io.emit('visitor_count_updated', activeVisitors.size);
   }
-
-  res.json({ success: true, activeCount: activeVisitors.size });
-});
-
-// 7. Get Active Visitor Count
-app.get('/api/visitor-count', (req, res) => {
-  res.json({ count: activeVisitors.size });
-});
-
-// 8. Order Placement Proxy
-app.post('/api/orders', async (req, res) => {
-  if (!isFirebaseOnline || !db) {
-    return res.status(503).json({ error: 'Database service is unavailable' });
+  if (getActiveAdminsCount() !== prevAdminsCount) {
+    io.emit('admin_presence_updated', getActiveAdminsCount());
   }
+
+  return { success: true, activeCount: activeVisitors.size, activeAdmins: getActiveAdminsCount() };
+});
+
+// 7. Visitor Count
+fastify.get('/api/visitor-count', async () => ({ count: activeVisitors.size }));
+
+// 8. Place Order
+fastify.post('/api/orders', async (req, reply) => {
+  if (!isFirebaseOnline || !db) return reply.code(503).send({ error: 'Database unavailable' });
   try {
-    const orderData = req.body;
-    orderData.created_at = orderData.created_at || new Date().toISOString();
+    const orderData = { ...req.body, created_at: req.body?.created_at || new Date().toISOString() };
     const docRef = await db.collection('orders').add(orderData);
-    res.status(201).json({ id: docRef.id, ...orderData });
-  } catch (err) {
-    console.error('Failed to create order:', err);
-    res.status(500).json({ error: err.message });
-  }
+    return reply.code(201).send({ id: docRef.id, ...orderData });
+  } catch (err) { return reply.code(500).send({ error: err.message }); }
 });
 
-// 9. Admin Fetch Orders (Capped to 100 to prevent read explosion!)
-app.get('/api/orders', async (req, res) => {
-  if (!isFirebaseOnline || !db) {
-    return res.status(503).json({ error: 'Database service is unavailable' });
-  }
+// 9. Fetch Orders (Admin)
+fastify.get('/api/orders', async (req, reply) => {
+  if (!isFirebaseOnline || !db) return reply.code(503).send({ error: 'Database unavailable' });
   try {
     const limit = parseInt(req.query.limit) || 100;
-    const snap = await db.collection('orders')
-      .orderBy('created_at', 'desc')
-      .limit(limit)
-      .get();
-    const orders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    res.json(orders);
-  } catch (err) {
-    console.error('Failed to fetch orders:', err);
-    res.status(500).json({ error: err.message });
-  }
+    const snap = await db.collection('orders').orderBy('created_at', 'desc').limit(limit).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) { return reply.code(500).send({ error: err.message }); }
 });
 
-// 10. Fetch Product Reviews (With in-memory/Redis caching)
-app.get('/api/reviews/:productId', async (req, res) => {
+// 10. Fetch Reviews
+fastify.get('/api/reviews/:productId', async (req, reply) => {
   const { productId } = req.params;
-  const key = cacheKeys.reviews(productId);
-
-  // Try fetching from cache (Redis or local memory fallback)
-  const cachedData = await getCacheValue(key, null);
-  if (cachedData) {
-    return res.json(cachedData);
-  }
-
-  // Serve from local memory as secondary fallback check
-  const now = Date.now();
-  const cachedLocal = cache.reviews[productId];
-  if (cachedLocal && (now - cachedLocal.ts) < 5 * 60 * 1000) {
-    return res.json(cachedLocal.data);
-  }
-
-  if (!isFirebaseOnline || !db) {
-    return res.json([]);
-  }
-
+  const cached = await getCacheValue(cacheKeys.reviews(productId), null);
+  if (cached) return cached;
+  if (!isFirebaseOnline || !db) return [];
   try {
-    const snap = await db.collection('reviews')
-      .where('product_id', '==', productId)
-      .get();
-    const reviews = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const snap = await db.collection('reviews').where('product_id', '==', productId).get();
+    const reviews = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     reviews.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
-    
-    // Store in cache (with 5-minute TTL)
-    await setCacheValue(key, reviews, 5 * 60);
-    res.json(reviews);
-  } catch (err) {
-    console.error('Failed to fetch reviews:', err);
-    res.status(500).json({ error: err.message });
-  }
+    await setCacheValue(cacheKeys.reviews(productId), reviews);
+    return reviews;
+  } catch (err) { return reply.code(500).send({ error: err.message }); }
 });
 
 // 11. Add Review
-app.post('/api/reviews', async (req, res) => {
-  if (!isFirebaseOnline || !db) {
-    return res.status(503).json({ error: 'Database service is unavailable' });
-  }
+fastify.post('/api/reviews', async (req, reply) => {
+  if (!isFirebaseOnline || !db) return reply.code(503).send({ error: 'Database unavailable' });
   try {
-    const reviewData = req.body;
-    reviewData.created_at = reviewData.created_at || new Date().toISOString();
+    const reviewData = { ...req.body, created_at: req.body?.created_at || new Date().toISOString() };
     const docRef = await db.collection('reviews').add(reviewData);
-    
-    // Invalidate product reviews cache in local RAM and Redis
     delete cache.reviews[reviewData.product_id];
-    if (isRedisOnline && redisClient) {
-      try {
-        await redisClient.del(cacheKeys.reviews(reviewData.product_id));
-      } catch (err) {
-        console.warn('[Redis Cache] Failed to invalidate reviews key:', err.message);
-      }
-    }
-    
-    res.status(201).json({ id: docRef.id, ...reviewData });
-  } catch (err) {
-    console.error('Failed to add review:', err);
-    res.status(500).json({ error: err.message });
-  }
+    return reply.code(201).send({ id: docRef.id, ...reviewData });
+  } catch (err) { return reply.code(500).send({ error: err.message }); }
 });
 
-// ─── WebSocket Event Handling ─────────────────────────────────
+// ── Socket.IO Events ──────────────────────────────────────────
 io.on('connection', (socket) => {
-  console.log(`🔌 Client connected to Socket.IO: ${socket.id}`);
+  console.log(`🔌 Socket connected: ${socket.id}`);
   
-  // Send active visitor count immediately to new dashboards
+  // Push initial status payloads immediately to the connecting client
   socket.emit('visitor_count_updated', activeVisitors.size);
-
-  // Send caches immediately so they don't wait for a background tick
-  if (cache.products.length > 0) socket.emit('products_changed', cache.products);
-  if (cache.categories.length > 0) socket.emit('categories_changed', cache.categories);
-  if (cache.sellers.length > 0) socket.emit('sellers_changed', cache.sellers);
-  if (cache.orders.length > 0) socket.emit('orders_changed', cache.orders);
-  if (Object.keys(cache.settings).length > 0) socket.emit('settings_changed', cache.settings);
-
-  // Respond to client keep-alive pings (prevents Render free-tier sleep)
-  socket.on('ping_keepalive', () => {
-    socket.emit('pong_keepalive');
-  });
-
-  socket.on('disconnect', () => {
-    console.log(`🔌 Client disconnected from Socket.IO: ${socket.id}`);
-  });
+  socket.emit('admin_presence_updated', getActiveAdminsCount());
+  
+  if (cache.products.length > 0)               socket.emit('products_changed', cache.products);
+  if (cache.categories.length > 0)             socket.emit('categories_changed', cache.categories);
+  if (cache.sellers.length > 0)                socket.emit('sellers_changed', cache.sellers);
+  if (cache.orders.length > 0)                 socket.emit('orders_changed', cache.orders);
+  if (Object.keys(cache.settings).length > 0)  socket.emit('settings_changed', cache.settings);
+  
+  socket.on('ping_keepalive', () => socket.emit('pong_keepalive'));
+  socket.on('disconnect', () => console.log(`🔌 Socket disconnected: ${socket.id}`));
 });
 
-// ─── Render 24/7 Keep-Alive Self-Ping ─────────────────────────
-// Free Render instances spin down after 15 minutes of inactivity.
-// We ping our own public URL every 10 minutes to keep the instance active and warm!
-const SELF_URL = process.env.SELF_URL || `https://nodejs-backend-1-ucbq.onrender.com`;
-if (SELF_URL) {
-  console.log(`📡 Keep-Alive configured. Warming self-pings every 8 min for: ${SELF_URL}`);
-  setInterval(async () => {
-    try {
-      const res = await fetch(`${SELF_URL}/api/health`);
-      console.log(`[Keep-Alive] Sent warming ping to self. Status: ${res.status}`);
-    } catch (err) {
-      console.warn(`[Keep-Alive] Self-ping failed:`, err.message);
-    }
-  }, 8 * 60 * 1000); // Every 8 minutes — well under Render's 15-min sleep threshold
+// ── Keep-Alive Self-Ping (prevents Render free-tier sleep) ────
+const SELF_URL = process.env.SELF_URL || 'https://nodejs-backend-1-wle5.onrender.com';
+setInterval(async () => {
+  try {
+    const r = await fetch(`${SELF_URL}/api/health`);
+    console.log(`[Keep-Alive] Self-ping OK — ${r.status}`);
+  } catch (e) { console.warn('[Keep-Alive] Self-ping failed:', e.message); }
+}, 8 * 60 * 1000);
+
+// ── Start ─────────────────────────────────────────────────────
+try {
+  await fastify.listen({ port: PORT, host: '0.0.0.0' });
+  console.log('===================================================');
+  console.log('⚡ Kwabz Store API — Powered by Fastify');
+  console.log(`📡 URL: http://localhost:${PORT}`);
+  console.log('🛡️  Firestore Live-Sync active...');
+  console.log('===================================================');
+  setupBackgroundSync();
+} catch (err) {
+  console.error(err);
+  process.exit(1);
 }
 
-// Start Server
-httpServer.listen(PORT, () => {
-  console.log(`===================================================`);
-  console.log(`🚀 Kwabz Store Optimization API Server Online!`);
-  console.log(`📡 URL: http://localhost:${PORT}`);
-  console.log(`🛡️  Live-Sync Engine listening to Firestore...`);
-  console.log(`===================================================`);
-  setupBackgroundSync();
-});
-
-// Graceful Shutdown
-process.on('SIGTERM', () => {
-  console.log('Gracefully shutting down...');
-  if (unsubscribers.products) unsubscribers.products();
-  if (unsubscribers.categories) unsubscribers.categories();
-  if (unsubscribers.sellers) unsubscribers.sellers();
-  if (unsubscribers.settings) unsubscribers.settings();
-  httpServer.close(() => {
-    console.log('Server process terminated.');
-    process.exit(0);
-  });
+// ── Graceful Shutdown ─────────────────────────────────────────
+process.on('SIGTERM', async () => {
+  console.log('Shutting down gracefully...');
+  Object.values(unsubscribers).forEach(unsub => { if (typeof unsub === 'function') unsub(); });
+  await fastify.close();
+  process.exit(0);
 });

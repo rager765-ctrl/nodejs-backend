@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Live Preview — Kwabz Store Admin</title>
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    /* Full Page Simulation Styles */
+    body { background: #000; overflow-x: hidden; color: #fff; }
+    
+    :root {
+      --primary: #000;
+      --font-headline: 'Manrope', sans-serif;
+      --font-body: 'Inter', sans-serif;
+    }
+
+    /* Hero Section */
+    .landing-hero {
+      position: relative;
+      height: 100dvh;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      overflow: hidden;
+    }
+
+    .landing-hero__image {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+    }
+
+    .landing-hero__image img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 1.5s ease-in-out;
+    }
+
+    .landing-hero__image img.active {
+      opacity: 1;
+    }
+
+    .landing-hero__overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.3), rgba(0,0,0,0.8));
+      z-index: 1;
+    }
+
+    .landing-hero__content {
+      position: relative;
+      z-index: 2;
+      max-width: 50rem;
+      padding: 2rem;
+    }
+
+    .landing-hero__tag {
+      display: inline-block;
+      padding: 0.5rem 1.25rem;
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
+      border-radius: 2rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      margin-bottom: 2rem;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .landing-hero__title {
+      font-family: var(--font-headline);
+      font-size: 5rem;
+      font-weight: 900;
+      letter-spacing: -0.05em;
+      line-height: 1;
+      margin-bottom: 1.5rem;
+      text-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+
+    .landing-hero__description {
+      font-size: 1.25rem;
+      line-height: 1.6;
+      opacity: 0.8;
+      margin-bottom: 3rem;
+      max-width: 35rem;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .btn-landing {
+      padding: 1.5rem 3.5rem;
+      border-radius: 4rem;
+      font-family: var(--font-headline);
+      font-weight: 900;
+      font-size: 1.125rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-landing--primary {
+      background: white;
+      color: black;
+      box-shadow: 0 15px 35px rgba(255,255,255,0.2);
+    }
+
+    /* Content Section */
+    .preview-section {
+      padding: 6rem 2rem;
+      background: #000;
+    }
+
+    .preview-section h2 {
+      font-family: var(--font-headline);
+      font-size: 3rem;
+      text-align: center;
+      margin-bottom: 4rem;
+      letter-spacing: -0.03em;
+    }
+
+    .product-grid-mock {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .product-card-mock {
+      background: #111;
+      border-radius: 1.5rem;
+      overflow: hidden;
+      border: 1px solid #222;
+    }
+
+    .product-card-mock__img {
+      aspect-ratio: 3/4;
+      background: #222;
+      position: relative;
+    }
+
+    .product-card-mock__img::after {
+      content: ''; /* Removed text overlay since we show real products */
+    }
+
+    .product-card-mock__info {
+      padding: 1.5rem;
+    }
+
+    .product-card-mock__name {
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .product-card-mock__price {
+      font-size: 0.875rem;
+      opacity: 0.6;
+    }
+
+    /* Fixed UI Components */
+    .top-app-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 5rem;
+      display: flex;
+      align-items: center;
+      padding: 0 2rem;
+      z-index: 100;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .bottom-nav {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 400px;
+      height: 4.5rem;
+      border-radius: 3rem;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    }
+
+    .bottom-nav__item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      opacity: 0.5;
+    }
+
+    .bottom-nav__item.active {
+      opacity: 1;
+    }
+
+    .preview-badge {
+      position: fixed;
+      top: 6rem;
+      right: 2rem;
+      background: #ff4757;
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 0.5rem;
+      font-size: 0.7rem;
+      font-weight: 900;
+      z-index: 200;
+      letter-spacing: 0.1em;
+    }
+
+    /* Mobile Responsive Overrides */
+    @media (max-width: 480px) {
+      .landing-hero__title { font-size: 3rem; }
+      .bottom-nav { width: calc(100% - 4rem); }
+      .landing-hero__description { font-size: 1rem; }
+    }
+  </style>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="../store.js"></script>
+  <script src="../utils.js"></script>
+  <script type="module" src="../shell.js"></script>
+</head>
+<body>
+
+  <div class="preview-badge">LIVE PREVIEW MODE</div>
+
+  <header class="top-app-bar">
+    <div id="previewLogoTitle" style="font-weight:900; font-size:1.5rem; letter-spacing:-0.05em; display: flex; align-items: center;">KWABZ STORE</div>
+    <div style="margin-left:auto; display:flex; gap:1.5rem;">
+      <span class="material-symbols-outlined" onclick="document.getElementById('broadcastModal').style.display='flex'" style="position:relative; cursor:pointer;">
+        notifications
+        <span class="bell-dot" style="position:absolute; top:0; right:0; width:8px; height:8px; background:#ff4757; border-radius:50%; display:none;"></span>
+      </span>
+      <span class="material-symbols-outlined">search</span>
+      <span class="material-symbols-outlined">shopping_bag</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="landing-hero">
+      <div class="landing-hero__image" id="heroImages"></div>
+      <div class="landing-hero__overlay"></div>
+      <div class="landing-hero__content">
+        <span class="landing-hero__tag" id="previewTag">TAGLINE</span>
+        <h1 class="landing-hero__title" id="previewTitle">HEADLINE</h1>
+        <p class="landing-hero__description" id="previewDesc">Description text goes here.</p>
+        <button class="btn-landing btn-landing--primary" id="previewCta">CTA BUTTON</button>
+      </div>
+    </section>
+
+    <section class="preview-section">
+      <h2>Featured Collection</h2>
+      <div class="product-grid-mock" id="previewProductGrid">
+        <!-- Will be populated dynamically with real products -->
+      </div>
+    </section>
+
+    <footer style="padding:6rem 2rem; border-top:1px solid #111; text-align:center; opacity:0.5;">
+      <div style="font-weight:900; margin-bottom:1rem;">KWABZ STORE</div>
+      <div style="font-size:0.75rem;">© 2024 MR RAGER • ACCRA</div>
+    </footer>
+  </main>
+
+  <nav class="bottom-nav">
+     <div class="bottom-nav__item active"><span class="material-symbols-outlined">home</span></div>
+     <div class="bottom-nav__item"><span class="material-symbols-outlined">shopping_bag</span></div>
+     <div class="bottom-nav__item"><span class="material-symbols-outlined">person</span></div>
+  </nav>
+
+  <script>
+    // ─── Live Preview Support ──────────────────────────────────
+    const previewChannel = new BroadcastChannel('kwabz_theme_preview');
+    previewChannel.onmessage = (event) => {
+      const theme = event.data;
+      if (!theme || typeof theme !== 'object') return;
+      
+      // Update Logo / Title
+      const logoType = theme.logoType || 'text';
+      const logoText = theme.logoText || 'Kwabz Store';
+      const logoImageUrl = theme.logoImageUrl || '';
+      const logoEl = document.getElementById('previewLogoTitle');
+      if (logoEl) {
+        if (logoType === 'image' && logoImageUrl) {
+          logoEl.innerHTML = `<img src="${logoImageUrl}" alt="${logoText}" style="max-height: 2.2rem; max-width: 160px; object-fit: contain; vertical-align: middle; display: block;" />`;
+        } else {
+          logoEl.textContent = logoText.toUpperCase();
+        }
+      }
+      
+      // Update Text Content
+      document.getElementById('previewTitle').textContent = theme.heroTitle || 'Your Campus Essentials, Simplified.';
+      document.getElementById('previewDesc').textContent = theme.heroDesc || 'Discover the best gear and essentials.';
+      document.getElementById('previewTag').textContent = theme.heroTag || 'FOR STUDENTS';
+      document.getElementById('previewCta').textContent = theme.ctaText || 'ENTER STORE';
+
+      // Update Typography
+      if (theme.fontFamily) {
+        document.documentElement.style.setProperty('--font-headline', theme.fontFamily);
+        document.documentElement.style.setProperty('--font-body', theme.fontFamily);
+      }
+      if (theme.heroFontSize) {
+        // Use the slider value as a multiplier for a responsive base
+        const size = theme.heroFontSize;
+        const titleEl = document.getElementById('previewTitle');
+        titleEl.style.fontSize = `clamp(2rem, ${size}rem, 8vh)`;
+        titleEl.style.lineHeight = '1.1';
+      }
+
+      // Update Colors & Glass
+      if (theme.primaryColor) {
+        document.documentElement.style.setProperty('--primary', theme.primaryColor);
+        const cta = document.getElementById('previewCta');
+        cta.style.color = theme.primaryColor;
+      }
+      
+      const glassColor = `rgba(255, 255, 255, ${theme.glassOpacity || 0.8})`;
+      document.querySelector('.top-app-bar').style.backgroundColor = glassColor;
+      document.querySelector('.bottom-nav').style.backgroundColor = glassColor;
+
+      // Broadcast Settings
+      document.getElementById('broadcastTitleText').textContent = theme.broadcastTitle || 'Store Announcement';
+      document.getElementById('broadcastMessageText').textContent = theme.broadcastMessage || 'Welcome to our store...';
+      
+      const waBtn = document.getElementById('broadcastWhatsappBtn');
+      if (theme.broadcastWhatsapp) {
+        waBtn.href = `https://wa.me/${theme.broadcastWhatsapp.replace(/\D/g,'')}`;
+        waBtn.style.display = 'flex';
+      } else waBtn.style.display = 'none';
+
+      const callBtn = document.getElementById('broadcastCallBtn');
+      if (theme.broadcastCall) {
+        callBtn.href = `tel:${theme.broadcastCall}`;
+        callBtn.style.display = 'flex';
+      } else callBtn.style.display = 'none';
+
+      const snapBtn = document.getElementById('broadcastSnapchatBtn');
+      if (theme.broadcastSnapchat) {
+        snapBtn.href = theme.broadcastSnapchat;
+        snapBtn.style.display = 'flex';
+      } else snapBtn.style.display = 'none';
+
+      const bellDot = document.querySelector('.bell-dot');
+      bellDot.style.display = (theme.broadcastTitle || theme.broadcastMessage) ? 'block' : 'none';
+
+      // Update Images & Slider
+      const container = document.getElementById('heroImages');
+      const images = [theme.heroImage1, theme.heroImage2, theme.heroImage3].filter(i => i);
+      if (images.length > 0) {
+        container.innerHTML = images.map((url, i) => 
+          `<img class="${i === 0 ? 'active' : ''}" src="${url}" />`
+        ).join('');
+        startSlider();
+      }
+    };
+
+    window.addEventListener('message', (event) => {
+      const theme = event.data;
+      if (!theme) return;
+ 
+      // Update Logo / Title
+      const logoType = theme.logoType || 'text';
+      const logoText = theme.logoText || 'Kwabz Store';
+      const logoImageUrl = theme.logoImageUrl || '';
+      const logoEl = document.getElementById('previewLogoTitle');
+      if (logoEl) {
+        if (logoType === 'image' && logoImageUrl) {
+          logoEl.innerHTML = `<img src="${logoImageUrl}" alt="${logoText}" style="max-height: 2.2rem; max-width: 160px; object-fit: contain; vertical-align: middle; display: block;" />`;
+        } else {
+          logoEl.textContent = logoText.toUpperCase();
+        }
+      }
+
+      // Update Text Content
+      document.getElementById('previewTitle').textContent = theme.heroTitle || 'Your Campus Essentials, Simplified.';
+      document.getElementById('previewDesc').textContent = theme.heroDesc || 'Discover the best gear and essentials.';
+      document.getElementById('previewTag').textContent = theme.heroTag || 'FOR STUDENTS';
+      document.getElementById('previewCta').textContent = theme.ctaText || 'ENTER STORE';
+
+      // Update Typography
+      if (theme.fontFamily) {
+        document.documentElement.style.setProperty('--font-headline', theme.fontFamily);
+        document.documentElement.style.setProperty('--font-body', theme.fontFamily);
+      }
+      if (theme.heroFontSize) {
+        // Use the slider value as a multiplier for a responsive base
+        const size = theme.heroFontSize;
+        const titleEl = document.getElementById('previewTitle');
+        titleEl.style.fontSize = `clamp(2rem, ${size}rem, 8vh)`;
+        titleEl.style.lineHeight = '1.1';
+      }
+
+      // Update Colors & Glass
+      if (theme.primaryColor) {
+        document.documentElement.style.setProperty('--primary', theme.primaryColor);
+        const cta = document.getElementById('previewCta');
+        cta.style.color = theme.primaryColor;
+      }
+      
+      const glassColor = `rgba(255, 255, 255, ${theme.glassOpacity || 0.8})`;
+      document.querySelector('.top-app-bar').style.backgroundColor = glassColor;
+      document.querySelector('.bottom-nav').style.backgroundColor = glassColor;
+
+      // Broadcast Settings
+      document.getElementById('broadcastTitleText').textContent = theme.broadcastTitle || 'Store Announcement';
+      document.getElementById('broadcastMessageText').textContent = theme.broadcastMessage || 'Welcome to our store...';
+      
+      const waBtn = document.getElementById('broadcastWhatsappBtn');
+      if (theme.broadcastWhatsapp) {
+        waBtn.href = `https://wa.me/${theme.broadcastWhatsapp.replace(/\D/g,'')}`;
+        waBtn.style.display = 'flex';
+      } else waBtn.style.display = 'none';
+
+      const callBtn = document.getElementById('broadcastCallBtn');
+      if (theme.broadcastCall) {
+        callBtn.href = `tel:${theme.broadcastCall}`;
+        callBtn.style.display = 'flex';
+      } else callBtn.style.display = 'none';
+
+      const snapBtn = document.getElementById('broadcastSnapchatBtn');
+      if (theme.broadcastSnapchat) {
+        snapBtn.href = theme.broadcastSnapchat;
+        snapBtn.style.display = 'flex';
+      } else snapBtn.style.display = 'none';
+
+      const bellDot = document.querySelector('.bell-dot');
+      bellDot.style.display = (theme.broadcastTitle || theme.broadcastMessage) ? 'block' : 'none';
+
+      // Update Images & Slider
+      const container = document.getElementById('heroImages');
+      const images = [theme.heroImage1, theme.heroImage2, theme.heroImage3].filter(i => i);
+      if (images.length > 0) {
+        container.innerHTML = images.map((url, i) => 
+          `<img class="${i === 0 ? 'active' : ''}" src="${url}" />`
+        ).join('');
+        startSlider();
+      }
+    });
+
+    let sliderInterval;
+    function startSlider() {
+      if (sliderInterval) clearInterval(sliderInterval);
+      const imgs = document.querySelectorAll('#heroImages img');
+      if (imgs.length <= 1) return;
+      let current = 0;
+      sliderInterval = setInterval(() => {
+        imgs[current].classList.remove('active');
+        current = (current + 1) % imgs.length;
+        imgs[current].classList.add('active');
+      }, 5000);
+    }
+    // Initialization is now handled by shell.js
+    // KwabzStore.init();
+
+    // ─── Real Products Rendering ───
+    function renderPreviewProducts() {
+      if (typeof KwabzStore === 'undefined') return;
+      const products = KwabzStore.getProducts().filter(p => p.in_stock !== false).slice(0, 4);
+      const grid = document.getElementById('previewProductGrid');
+      if (!grid) return;
+
+      if (products.length === 0) {
+        grid.innerHTML = '<p style="text-align:center; opacity:0.5; grid-column:1/-1; padding: 2rem;">No products available yet. Add products to see them here.</p>';
+        return;
+      }
+
+      grid.innerHTML = products.map(product => {
+        const price = (typeof KwabzUtils !== 'undefined') ? KwabzUtils.formatPrice(product.price) : `GH₵ ${product.price}`;
+        return `
+          <div class="product-card-mock">
+            <div class="product-card-mock__img" style="background: url('${product.image_url}') center/cover; position: relative;">
+              <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.2);"></div>
+            </div>
+            <div class="product-card-mock__info">
+              <div class="product-card-mock__name" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${product.name}</div>
+              <div class="product-card-mock__price">${price}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    if (typeof KwabzStore !== 'undefined') {
+      KwabzStore.on('products_changed', renderPreviewProducts);
+      renderPreviewProducts();
+    }
+
+    // Signal parent that we are ready for data
+    window.parent.postMessage('PREVIEW_READY', '*');
+    console.log('[Preview] Sent READY signal to parent');
+  </script>
+
+  <!-- ═══ Broadcast Infos Modal (For Preview) ═══ -->
+  <div id="broadcastModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); z-index:9999; align-items:center; justify-content:center; padding:1.5rem;">
+    <div style="background:white; width:100%; max-width:400px; padding:2.5rem; border-radius:2.5rem; position:relative; text-align:center; color:black;">
+      <button onclick="document.getElementById('broadcastModal').style.display='none'" style="position:absolute; top:1.5rem; right:1.5rem; color:#888; background:transparent; border:none; cursor:pointer;">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+      <div style="width:4rem; height:4rem; background:#f3f4f6; border-radius:1.5rem; display:flex; align-items:center; justify-content:center; margin:0 auto 1.5rem;">
+        <span class="material-symbols-outlined" style="font-size:2rem; color:black;">campaign</span>
+      </div>
+      <h2 id="broadcastTitleText" class="font-headline" style="font-size:1.5rem; font-weight:900; margin-bottom:1rem; letter-spacing:-0.03em;">Store Announcement</h2>
+      <p id="broadcastMessageText" style="color:#666; font-size:0.9375rem; line-height:1.6; margin-bottom:2rem;">Welcome to our store...</p>
+
+      <div style="display:flex; flex-direction:column; gap:0.75rem;">
+        <a id="broadcastWhatsappBtn" href="#" style="display:none; align-items:center; justify-content:center; gap:0.75rem; padding:1.1rem; background:#25D366; color:white; text-decoration:none; border-radius:1rem; font-weight:700;">
+          WhatsApp Us
+        </a>
+        <a id="broadcastCallBtn" href="#" style="display:none; align-items:center; justify-content:center; gap:0.75rem; padding:1.1rem; background:#f3f4f6; color:black; text-decoration:none; border-radius:1rem; font-weight:700;">
+          Call Us
+        </a>
+        <a id="broadcastSnapchatBtn" href="#" style="display:none; align-items:center; justify-content:center; gap:0.75rem; padding:1.1rem; background:#FFFC00; color:black; text-decoration:none; border-radius:1rem; font-weight:700;">
+          Snapchat
+        </a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+

@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Storefront Theme — Kwabz Store Admin</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+
+<body>
+
+  <!-- Top App Bar -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <a href="admin-dashboard.html" class="icon-btn">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </a>
+      <span class="top-app-bar__title font-headline">Storefront Theme</span>
+    </div>
+    <div class="top-app-bar__actions">
+      <button class="icon-btn" onclick="saveTheme()" title="Save Theme"
+        style="background:var(--primary);color:var(--on-primary);border-radius:var(--radius-lg);">
+        <span class="material-symbols-outlined" style="font-size:1.25rem;">save</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="page-content page-content--admin"
+    style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: 1400px; margin: 0 auto;">
+
+    <!-- Settings Column -->
+    <section style="margin-bottom:2rem;">
+      <div
+        style="display: flex; gap: 0.5rem; margin-bottom: 2rem; background: var(--surface-container-highest); padding: 0.5rem; border-radius: 1.5rem; overflow-x: auto;">
+        <button onclick="switchTab('home')" id="tabHome"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; background: var(--primary); color: white; white-space: nowrap;">Home</button>
+        <button onclick="switchTab('shop')" id="tabShop"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Shop</button>
+        <button onclick="switchTab('product')" id="tabProduct"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Product</button>
+        <button onclick="switchTab('cart')" id="tabCart"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Cart</button>
+        <button onclick="switchTab('checkout')" id="tabCheckout"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Checkout</button>
+        <button onclick="switchTab('profile')" id="tabProfile"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Profile</button>
+        <button onclick="switchTab('splash')" id="tabSplash"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Splash</button>
+        <button onclick="switchTab('widget')" id="tabWidget"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Widget</button>
+      </div>
+
+      <form id="themeForm" onsubmit="event.preventDefault(); saveTheme();"
+        style="display:flex; flex-direction:column; gap:2rem;">
+
+        <!-- SPLASH & PWA SETTINGS -->
+        <div id="sectionSplash" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
+              Splash Screen & PWA</h3>
+
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Store Name (Splash Logo Text)</label>
+              <input type="text" id="splashStoreName" class="minimal-input" placeholder="KWABZ STORE" />
+            </div>
+
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Splash Background Image URL</label>
+              <input type="text" id="splashBgImage" class="minimal-input" placeholder="https://unsplash.com/..." />
+            </div>
+
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Global Favicon/Icon URL</label>
+              <input type="text" id="splashFavicon" class="minimal-input" placeholder="https://..." />
+            </div>
+
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Loading Bar Color</label>
+              <div style="display:flex; gap:1rem; align-items:center;">
+                <input type="color" id="splashLoaderColor" value="#8b0000"
+                  style="width:50px; height:50px; border:none; border-radius:12px; cursor:pointer;" />
+                <span style="font-family:monospace; color:var(--on-surface-variant); font-size:0.875rem;">Main Branding
+                  Color</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-group__label">Loading Bar Style</label>
+              <select id="splashLoaderStyle" class="minimal-select">
+                <option value="metallic">Premium Metallic (Ruby/Gold)</option>
+                <option value="minimal">Minimalist Solid</option>
+                <option value="glow">Neon Glow (Cyberpunk)</option>
+                <option value="shimmer">Glass Shimmer (Frosted)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Auth Pages Banners -->
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
+              Authentication & Onboarding Banners</h3>
+
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Login (Sign In) Banner Image URL</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="authLoginImage" class="minimal-input" placeholder="https://..." />
+                <input type="file" id="fileAuthLogin" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'authLoginImage')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileAuthLogin').click()">Upload</button>
+              </div>
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Specify an image URL or upload to use as Login banner. Default: Unsplash Boutique Interior</p>
+            </div>
+
+            <div class="form-group">
+              <label class="form-group__label">Sign Up (Register) Banner Image URL</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="authSignupImage" class="minimal-input" placeholder="https://..." />
+                <input type="file" id="fileAuthSignup" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'authSignupImage')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileAuthSignup').click()">Upload</button>
+              </div>
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Specify an image URL or upload to use as Sign Up banner. Default: Unsplash Fashion Shopping</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- HOME PAGE SETTINGS -->
+        <div id="sectionHome" class="theme-section" style="display: flex; flex-direction: column; gap: 2rem;">
+          <!-- Store Logo & Branding -->
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
+              Store Logo & Branding</h3>
+
+            <div class="form-group" style="margin-bottom:1.25rem;">
+              <label class="form-group__label">Logo Type</label>
+              <select id="logoType" class="minimal-select" onchange="toggleLogoFields()">
+                <option value="text">Custom Text Logo</option>
+                <option value="image">Uploaded Logo Image</option>
+              </select>
+            </div>
+
+            <div class="form-group" id="logoTextGroup" style="margin-bottom:1.25rem;">
+              <label class="form-group__label">Logo Text Content</label>
+              <input type="text" id="logoText" class="minimal-input" placeholder="e.g. Kwabz Store" />
+            </div>
+
+            <div class="form-group" id="logoImageGroup" style="margin-bottom:1.25rem; display:none;">
+              <label class="form-group__label">Logo Image Upload</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="logoImageUrl" class="minimal-input" placeholder="Upload a logo image..." />
+                <input type="file" id="fileLogo" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'logoImageUrl')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileLogo').click()">Upload</button>
+              </div>
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Choose a PNG or transparent logo image (max size 1MB).</p>
+            </div>
+          </div>
+
+          <!-- Typography & Messaging -->
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
+              Messaging</h3>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Title (Main Headline)</label>
+              <input type="text" id="heroTitle" class="minimal-input"
+                placeholder="e.g. Your Campus Essentials, Simplified." />
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Description (Subheadline)</label>
+              <textarea id="heroDesc" class="minimal-input" rows="3"
+                placeholder="Premium quality meets student affordability..." style="resize:vertical;"></textarea>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Tag (Small text above title)</label>
+              <input type="text" id="heroTag" class="minimal-input" placeholder="e.g. For Students, By Students" />
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Global Font Family</label>
+              <select id="fontFamily" class="minimal-select">
+                <option value="'Inter', sans-serif">Inter</option>
+                <option value="'Manrope', sans-serif">Manrope</option>
+                <option value="'Outfit', sans-serif">Outfit</option>
+                <option value="'Playfair Display', serif">Playfair Display</option>
+                <option value="'Space Grotesk', sans-serif">Space Grotesk</option>
+              </select>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Title Font Size (Mobile Base)</label>
+              <div style="display:flex; align-items:center; gap:1rem;">
+                <input type="range" id="heroFontSize" min="1.5" max="4" step="0.1" value="2.5" style="flex:1;"
+                  oninput="document.getElementById('heroFontSizeVal').textContent = this.value + 'rem';" />
+                <span id="heroFontSizeVal" style="font-family:monospace; width:4rem;">2.5rem</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-group__label">Primary CTA Button Text</label>
+              <input type="text" id="ctaText" class="minimal-input" placeholder="e.g. Enter Store" />
+            </div>
+          </div>
+
+          <!-- Hero Images -->
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">Hero
+              Images (Auto-Sliding)</h3>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Image URL 1</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="heroImage1" class="minimal-input" placeholder="https://..." />
+                <input type="file" id="file1" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'heroImage1')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('file1').click()">Upload</button>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Image URL 2</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="heroImage2" class="minimal-input" placeholder="https://..." />
+                <input type="file" id="file2" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'heroImage2')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('file2').click()">Upload</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-group__label">Image URL 3</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="heroImage3" class="minimal-input" placeholder="https://..." />
+                <input type="file" id="file3" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'heroImage3')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('file3').click()">Upload</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Broadcast Settings -->
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <div
+              style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
+              <h3 class="font-headline" style="margin:0;">Broadcast / Bell Notifications</h3>
+              <button type="button" onclick="clearBroadcasts()" class="btn-secondary"
+                style="padding:0.4rem 0.8rem; font-size:0.75rem; color:#b91c1c; border-color:#fecaca; background:#fef2f2;">
+                <span class="material-symbols-outlined"
+                  style="font-size:1rem; vertical-align:middle;">delete_sweep</span> Clear All
+              </button>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Broadcast Title</label>
+              <input type="text" id="broadcastTitle" class="minimal-input" placeholder="e.g. Store Announcement" />
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Broadcast Message</label>
+              <textarea id="broadcastMessage" class="minimal-input" rows="2" placeholder="Welcome to our store..."
+                style="resize:vertical;"></textarea>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">WhatsApp Number</label>
+              <input type="text" id="broadcastWhatsapp" class="minimal-input" placeholder="e.g. 233000000000" />
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Include country code, no '+'.
+                Leave blank to hide.</p>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Phone Number (Call)</label>
+              <input type="text" id="broadcastCall" class="minimal-input" placeholder="e.g. +233000000000" />
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Leave blank to hide.</p>
+            </div>
+
+            <div class="form-group">
+              <label class="form-group__label">Snapchat Link</label>
+              <input type="text" id="broadcastSnapchat" class="minimal-input"
+                placeholder="e.g. https://snapchat.com/add/username" />
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Leave blank to hide.</p>
+            </div>
+          </div>
+
+        </div> <!-- End sectionHome -->
+
+        <!-- SHOP PAGE SETTINGS -->
+        <div id="sectionShop" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
+          <!-- Hero Section -->
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">Shop
+              Hero & Banner</h3>
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Navigation Controls</label>
+              <div style="display:flex; flex-direction:column; gap:0.75rem;">
+                <div
+                  style="display:flex; align-items:center; justify-content:space-between; background:var(--surface-container-low); padding:0.75rem 1rem; border-radius:var(--radius-lg);">
+                  <span class="text-body-sm" style="font-weight:600;">Show Shop Menu (Hamburger)</span>
+                  <select id="showShopMenu" class="minimal-select"
+                    style="width:auto; padding:0.25rem 2rem 0.25rem 1rem; height:2.5rem;">
+                    <option value="true">Visible</option>
+                    <option value="false">Hidden</option>
+                  </select>
+                </div>
+                <div
+                  style="display:flex; align-items:center; justify-content:space-between; background:var(--surface-container-low); padding:0.75rem 1rem; border-radius:var(--radius-lg);">
+                  <span class="text-body-sm" style="font-weight:600;">Enable Shop Hero</span>
+                  <select id="showShopHero" class="minimal-select"
+                    style="width:auto; padding:0.25rem 2rem 0.25rem 1rem; height:2.5rem;">
+                    <option value="false">Hidden</option>
+                    <option value="true">Visible</option>
+                  </select>
+                </div>
+                <div
+                  style="display:flex; align-items:center; justify-content:space-between; background:var(--surface-container-low); padding:0.75rem 1rem; border-radius:var(--radius-lg);">
+                  <span class="text-body-sm" style="font-weight:600;">Show Floating Mini Store Button</span>
+                  <select id="showMiniStoreFAB" class="minimal-select"
+                    style="width:auto; padding:0.25rem 2rem 0.25rem 1rem; height:2.5rem;">
+                    <option value="true">Visible</option>
+                    <option value="false">Hidden</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Title</label>
+              <input type="text" id="shopHeroTitle" class="minimal-input" placeholder="e.g. Campus Essentials" />
+            </div>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Description</label>
+              <input type="text" id="shopHeroDesc" class="minimal-input" placeholder="Sub-heading text..." />
+            </div>
+            <!-- Double Image Upload Options -->
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Background Image 1</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="shopHeroImage" class="minimal-input" placeholder="URL or Base64..." />
+                <input type="file" id="fileShopHero" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'shopHeroImage')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileShopHero').click()">Upload</button>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Hero Background Image 2 (For Auto-Slider)</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="shopHeroImage2" class="minimal-input" placeholder="URL or Base64..." />
+                <input type="file" id="fileShopHero2" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'shopHeroImage2')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileShopHero2').click()">Upload</button>
+              </div>
+            </div>
+
+            <!-- Text Styling & Customization -->
+            <h4 class="font-headline" style="font-size:0.9rem; margin-top:1.5rem; margin-bottom:1rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.25rem;">Text Over Image Settings</h4>
+            
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Text Alignment</label>
+              <select id="shopHeroAlign" class="minimal-select">
+                <option value="left">Left Aligned</option>
+                <option value="center">Center Aligned</option>
+                <option value="right">Right Aligned</option>
+              </select>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Title Font Size</label>
+              <select id="shopHeroTitleSize" class="minimal-select">
+                <option value="2rem">Small (2.0rem)</option>
+                <option value="2.75rem" selected>Medium (2.75rem)</option>
+                <option value="3.5rem">Large (3.5rem)</option>
+                <option value="4.25rem">Extra Large (4.25rem)</option>
+              </select>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Text Style</label>
+              <select id="shopHeroStyle" class="minimal-select">
+                <option value="normal">Normal (Sans-Serif)</option>
+                <option value="italic">Italic (Sans-Serif)</option>
+                <option value="elegant">Elegant Serif (Playfair)</option>
+                <option value="modern">Modern Geometric (Outfit)</option>
+                <option value="bold-italic">Bold Italic</option>
+              </select>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Text Custom Color</label>
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <input type="color" id="shopHeroColor" class="minimal-input" style="width:3rem; height:2.5rem; padding:0.2rem; cursor:pointer;" value="#ffffff" />
+                <input type="text" id="shopHeroColorHex" class="minimal-input" placeholder="#FFFFFF" style="flex:1;" oninput="document.getElementById('shopHeroColor').value = this.value; updatePreview();" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Search & Layout -->
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
+              Search & Grid</h3>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Search Placeholder</label>
+              <input type="text" id="searchPlaceholder" class="minimal-input"
+                placeholder="e.g. What are you looking for?" />
+            </div>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Shop Page Title / Main Store Text (e.g. Kwabz Main Store)</label>
+              <input type="text" id="shopTitle" class="minimal-input" placeholder="e.g. Kwabz Main Store" />
+            </div>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Items per Grid Row (Desktop)</label>
+              <select id="shopGrid" class="minimal-select">
+                <option value="3">3 Columns</option>
+                <option value="4" selected>4 Columns</option>
+                <option value="5">5 Columns</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Sellers Layout Style (Mobile)</label>
+              <select id="sellersLayout" class="minimal-select">
+                <option value="original">Original Hero Card (Overlap Logo)</option>
+                <option value="grid">Grid (Store Logo & Name)</option>
+                <option value="list">List (Store Icon, Name & Bio)</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Sellers Card Background (Mobile)</label>
+              <select id="sellersCardBg" class="minimal-select">
+                <option value="plain">Plain Theme Color (Lowest Container)</option>
+                <option value="hero">Store Hero Cover Image</option>
+              </select>
+            </div>
+            
+            <h4 class="font-headline" style="font-size:0.9rem; margin-top:1.5rem; margin-bottom:1rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.25rem;">Sellers Directory Page Settings</h4>
+            
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Sellers Page Header Title</label>
+              <input type="text" id="sellersTitle" class="minimal-input" placeholder="e.g. The Curator Network" />
+            </div>
+
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Sellers Page Header Description</label>
+              <textarea id="sellersDesc" class="minimal-input" rows="2" placeholder="Discover independent mini-stores..." style="resize:vertical;"></textarea>
+            </div>
+
+            <div class="form-group">
+              <label class="form-group__label">Sellers Page Banner Image (Optional)</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="sellersBgImage" class="minimal-input" placeholder="Upload a banner or paste a URL..." />
+                <input type="file" id="fileSellersBg" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'sellersBgImage')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileSellersBg').click()">Upload</button>
+              </div>
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Upload a premium cover image. Leave blank to use a solid background color.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- PRODUCT PAGE SETTINGS -->
+        <div id="sectionProduct" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
+              Product Details</h3>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Buy Button Text</label>
+              <input type="text" id="buyBtnText" class="minimal-input" placeholder="e.g. Add to Bag" />
+            </div>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Pre-order Button Text</label>
+              <input type="text" id="preOrderBtnText" class="minimal-input" placeholder="e.g. Pre-order Now" />
+            </div>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Enable Pre-order Button Toggle</label>
+              <select id="enablePreOrder" class="minimal-select">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-group__label">Show Related Products</label>
+              <select id="showRelated" class="minimal-select">
+                <option value="true">Visible</option>
+                <option value="false">Hidden</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- CART PAGE SETTINGS -->
+        <div id="sectionCart" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">Cart
+              & Checkout</h3>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Empty Cart Message</label>
+              <input type="text" id="emptyCartMsg" class="minimal-input" placeholder="Your cart is lonely..." />
+            </div>
+            <div class="form-group">
+              <label class="form-group__label">Checkout Button Text</label>
+              <input type="text" id="checkoutBtnText" class="minimal-input" placeholder="Complete via WhatsApp" />
+            </div>
+          </div>
+        </div>
+
+        <!-- CHECKOUT PAGE SETTINGS -->
+        <div id="sectionCheckout" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
+              Checkout Options</h3>
+            <div class="form-group">
+              <label class="form-group__label">Payment Instructions (Short)</label>
+              <input type="text" id="paymentInstructions" class="minimal-input"
+                placeholder="Pay via MoMo upon confirmation..." />
+            </div>
+          </div>
+        </div>
+
+        <!-- PROFILE PAGE SETTINGS -->
+        <div id="sectionProfile" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">User
+              Profile</h3>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Profile Greeting</label>
+              <input type="text" id="profileGreeting" class="minimal-input" placeholder="Welcome back," />
+            </div>
+            <div class="form-group">
+              <label class="form-group__label">Order History Title</label>
+              <input type="text" id="orderHistoryTitle" class="minimal-input" placeholder="Your Recent Deals" />
+            </div>
+          </div>
+        </div>
+
+        <!-- WIDGET CARD SETTINGS -->
+        <div id="sectionWidget" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
+              Live Widgets Board Configuration</h3>
+            
+            <p class="text-body-sm" style="color:var(--outline); margin-bottom:1.5rem; line-height:1.4;">
+              Select which real-time feed cards to display on your Live Widget Dashboard screen. Check the feeds you want active.
+            </p>
+
+            <div style="display:flex; flex-direction:column; gap:1rem;">
+              <!-- Incoming Orders -->
+              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
+                <input type="checkbox" id="wCard_orders" class="widget-card-checkbox" value="orders" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-weight:700; font-size:0.875rem;">Incoming Active Orders</span>
+                  <span style="font-size:0.75rem; color:var(--outline);">Pending & Confirmed orders count</span>
+                </div>
+              </label>
+
+              <!-- Gross Revenue -->
+              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
+                <input type="checkbox" id="wCard_revenue" class="widget-card-checkbox" value="revenue" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-weight:700; font-size:0.875rem;">Gross Revenue</span>
+                  <span style="font-size:0.75rem; color:var(--outline);">Live gross sales total (excluding cancelled orders)</span>
+                </div>
+              </label>
+
+              <!-- Admin Commissions -->
+              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
+                <input type="checkbox" id="wCard_commission" class="widget-card-checkbox" value="commission" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-weight:700; font-size:0.875rem;">Admin Commissions</span>
+                  <span style="font-size:0.75rem; color:var(--outline);">Live calculated third-party seller commissions</span>
+                </div>
+              </label>
+
+              <!-- Pending Orders -->
+              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
+                <input type="checkbox" id="wCard_pending" class="widget-card-checkbox" value="pending" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-weight:700; font-size:0.875rem;">Pending Orders Status</span>
+                  <span style="font-size:0.75rem; color:var(--outline);">Count of orders in 'pending' status</span>
+                </div>
+              </label>
+
+              <!-- Delivered Orders -->
+              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
+                <input type="checkbox" id="wCard_delivered" class="widget-card-checkbox" value="delivered" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-weight:700; font-size:0.875rem;">Delivered Orders Status</span>
+                  <span style="font-size:0.75rem; color:var(--outline);">Count of orders completed & delivered</span>
+                </div>
+              </label>
+
+              <!-- Cancelled Orders -->
+              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
+                <input type="checkbox" id="wCard_cancelled" class="widget-card-checkbox" value="cancelled" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-weight:700; font-size:0.875rem;">Cancelled Orders Status</span>
+                  <span style="font-size:0.75rem; color:var(--outline);">Count of cancelled orders</span>
+                </div>
+              </label>
+
+              <!-- Products Count -->
+              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
+                <input type="checkbox" id="wCard_products" class="widget-card-checkbox" value="products" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-weight:700; font-size:0.875rem;">Listed Products Count</span>
+                  <span style="font-size:0.75rem; color:var(--outline);">Total catalog products listed online</span>
+                </div>
+              </label>
+
+              <!-- Active Presence -->
+              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
+                <input type="checkbox" id="wCard_presence" class="widget-card-checkbox" value="presence" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-weight:700; font-size:0.875rem;">Online Active Admins</span>
+                  <span style="font-size:0.75rem; color:var(--outline);">Live connected admin team counts</span>
+                </div>
+              </label>
+
+              <!-- Daily Reads -->
+              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
+                <input type="checkbox" id="wCard_reads" class="widget-card-checkbox" value="reads" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
+                <div style="display:flex; flex-direction:column;">
+                  <span style="font-weight:700; font-size:0.875rem;">Firestore Daily Reads</span>
+                  <span style="font-size:0.75rem; color:var(--outline);">Daily Firebase billing reads counter</span>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Global UI (Always visible at bottom or moved to its own section) -->
+        <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+          <h3 class="font-headline"
+            style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">Global
+            Brand Style</h3>
+
+          <div class="form-group" style="margin-bottom:1.5rem;">
+            <label class="form-group__label">Glass Dock Opacity (Top / Bottom Nav)</label>
+            <div style="display:flex; align-items:center; gap:1rem;">
+              <input type="range" id="glassOpacity" min="0" max="1" step="0.05" value="0.8" style="flex:1;"
+                oninput="document.getElementById('glassOpacityVal').textContent = Math.round(this.value * 100) + '%';" />
+              <span id="glassOpacityVal" style="font-family:monospace; width:4rem;">80%</span>
+            </div>
+          </div>
+
+          <!-- Colors & Contact -->
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">Brand
+              Colors & Contact</h3>
+
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Primary Color (Buttons, Accents)</label>
+              <div style="display:flex; gap:1rem; align-items:center;">
+                <input type="color" id="primaryColor"
+                  style="width:3rem; height:3rem; border:none; padding:0; background:none; cursor:pointer;" />
+                <span id="primaryHex" style="font-family:monospace;">#000000</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-group__label">Main Store WhatsApp (for Orders)</label>
+              <input type="text" id="storeWhatsapp" class="minimal-input" placeholder="e.g. 233553866329" />
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Orders will be sent here if no
+                seller is specified. Use country code, no '+'.</p>
+            </div>
+          </div>
+
+          <button type="submit" class="btn-primary" style="margin-top:1rem; padding:1.25rem; font-size:1rem;">Apply
+            Theme Updates</button>
+      </form>
+    </section>
+
+    <!-- Preview Column -->
+    <section
+      style="position: sticky; top: 6rem; height: calc(100dvh - 8rem); display: flex; flex-direction: column; gap: 1rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h2 class="section-header" style="margin: 0;">Live Preview</h2>
+        <div
+          style="display: flex; background: var(--surface-container-highest); padding: 0.25rem; border-radius: 1rem; gap: 0.25rem;">
+          <button type="button" onclick="setPreviewSize('mobile')" id="btnMobile"
+            style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 0.75rem; font-size: 0.75rem; font-weight: 700; background: var(--primary); color: white;">
+            <span class="material-symbols-outlined" style="font-size: 1.25rem;">smartphone</span> Mobile
+          </button>
+          <button type="button" onclick="setPreviewSize('desktop')" id="btnDesktop"
+            style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 0.75rem; font-size: 0.75rem; font-weight: 700; color: var(--on-surface-variant);">
+            <span class="material-symbols-outlined" style="font-size: 1.25rem;">desktop_windows</span> Desktop
+          </button>
+        </div>
+      </div>
+
+      <div id="previewContainer"
+        style="width: 375px; height: 100%; margin: 0 auto; border-radius: 2.5rem; overflow: hidden; border: 8px solid var(--on-surface); box-shadow: 0 20px 50px rgba(0,0,0,0.3); transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);">
+        <iframe id="previewFrame" src="admin-live-preview.html" style="width: 100%; height: 100%; border: none;"
+          onload="updatePreview()"></iframe>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="../store.js"></script>
+  <script src="../utils.js"></script>
+  <script type="module" src="../shell.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      if (typeof KwabzUtils !== 'undefined') {
+        KwabzUtils.requireAdmin();
+      }
+      loadTheme();
+    });
+
+    function getThemeData() {
+      const getVal = (id) => {
+        const el = document.getElementById(id);
+        return el ? el.value : '';
+      };
+
+      const widgetCards = [];
+      document.querySelectorAll('.widget-card-checkbox').forEach(cb => {
+        if (cb.checked) widgetCards.push(cb.value);
+      });
+
+      return {
+        activeField: document.activeElement ? document.activeElement.id : '',
+        logoType: getVal('logoType') || 'text',
+        logoText: getVal('logoText').trim(),
+        logoImageUrl: getVal('logoImageUrl').trim(),
+        // Home
+        heroTitle: getVal('heroTitle').trim(),
+        heroDesc: getVal('heroDesc').trim(),
+        heroTag: getVal('heroTag').trim(),
+        ctaText: getVal('ctaText').trim(),
+        heroImage1: getVal('heroImage1').trim(),
+        heroImage2: getVal('heroImage2').trim(),
+        heroImage3: getVal('heroImage3').trim(),
+        broadcastTitle: getVal('broadcastTitle').trim(),
+        broadcastMessage: getVal('broadcastMessage').trim(),
+        broadcastWhatsapp: getVal('broadcastWhatsapp').trim(),
+        broadcastCall: getVal('broadcastCall').trim(),
+        broadcastSnapchat: getVal('broadcastSnapchat').trim(),
+        // Shop
+        showShopMenu: getVal('showShopMenu') || 'true',
+        showShopHero: getVal('showShopHero'),
+        showMiniStoreFAB: getVal('showMiniStoreFAB') || 'true',
+        shopHeroTitle: getVal('shopHeroTitle').trim(),
+        shopHeroDesc: getVal('shopHeroDesc').trim(),
+        shopHeroImage: getVal('shopHeroImage').trim(),
+        shopHeroImage2: getVal('shopHeroImage2').trim(),
+        shopHeroAlign: getVal('shopHeroAlign') || 'left',
+        shopHeroTitleSize: getVal('shopHeroTitleSize') || '2.75rem',
+        shopHeroStyle: getVal('shopHeroStyle') || 'normal',
+        shopHeroColor: getVal('shopHeroColor') || '#ffffff',
+        searchPlaceholder: getVal('searchPlaceholder').trim(),
+        shopTitle: getVal('shopTitle').trim(),
+        shopGrid: getVal('shopGrid') || '4',
+        sellersLayout: getVal('sellersLayout') || 'original',
+        sellersCardBg: getVal('sellersCardBg') || 'plain',
+        sellersTitle: getVal('sellersTitle').trim(),
+        sellersDesc: getVal('sellersDesc').trim(),
+        sellersBgImage: getVal('sellersBgImage').trim(),
+        // Product
+        buyBtnText: getVal('buyBtnText').trim(),
+        preOrderBtnText: getVal('preOrderBtnText').trim(),
+        enablePreOrder: getVal('enablePreOrder') || 'true',
+        showRelated: getVal('showRelated') || 'true',
+        // Cart
+        emptyCartMsg: getVal('emptyCartMsg').trim(),
+        checkoutBtnText: getVal('checkoutBtnText').trim(),
+        // Profile
+        profileGreeting: getVal('profileGreeting').trim(),
+        orderHistoryTitle: getVal('orderHistoryTitle').trim(),
+        // Global
+        primaryColor: getVal('primaryColor') || '#000000',
+        fontFamily: getVal('fontFamily'),
+        heroFontSize: getVal('heroFontSize'),
+        glassOpacity: getVal('glassOpacity'),
+        // Splash & PWA
+        splashStoreName: getVal('splashStoreName').trim(),
+        splashBgImage: getVal('splashBgImage').trim(),
+        splashFavicon: getVal('splashFavicon').trim(),
+        splashLoaderColor: getVal('splashLoaderColor'),
+        splashLoaderStyle: getVal('splashLoaderStyle'),
+        authLoginImage: getVal('authLoginImage').trim(),
+        authSignupImage: getVal('authSignupImage').trim(),
+        storeWhatsapp: getVal('storeWhatsapp').trim(),
+        paymentInstructions: getVal('paymentInstructions').trim(),
+        // Widgets
+        widgetCards: widgetCards
+      };
+    }
+
+    function switchTab(tab) {
+      // Toggle Sections
+      document.querySelectorAll('.theme-section').forEach(s => s.style.display = 'none');
+      const sectionId = 'section' + tab.charAt(0).toUpperCase() + tab.slice(1);
+      const section = document.getElementById(sectionId);
+      if (section) section.style.display = 'flex';
+
+      // Toggle Button Styles
+      ['Home', 'Shop', 'Product', 'Cart', 'Checkout', 'Profile', 'Splash', 'Widget'].forEach(t => {
+        const btn = document.getElementById('tab' + t);
+        if (!btn) return;
+        if (t.toLowerCase() === tab) {
+          btn.style.background = 'var(--primary)';
+          btn.style.color = 'white';
+        } else {
+          btn.style.background = 'transparent';
+          btn.style.color = 'var(--on-surface-variant)';
+        }
+      });
+
+      // Update Preview URL based on tab
+      const frame = document.getElementById('previewFrame');
+      if (tab === 'home') frame.src = 'admin-live-preview.html';
+      else if (tab === 'shop') frame.src = 'shop.html?preview=true';
+      else if (tab === 'product') {
+        const products = KwabzStore.getAllProducts();
+        const firstProd = products.find(p => p.image_url) || products[0];
+        const pid = firstProd ? firstProd.id : '';
+        frame.src = `product-detail.html?id=${pid}&preview=true`;
+      }
+      else if (tab === 'cart') frame.src = 'cart.html?preview=true';
+      else if (tab === 'checkout') frame.src = 'checkout.html?preview=true';
+      else if (tab === 'profile') frame.src = 'account.html?preview=true';
+      else if (tab === 'splash') frame.src = 'index.html?preview=splash';
+      else if (tab === 'widget') frame.src = 'admin-widget.html?preview=true';
+    }
+
+    // ─── Live Preview Support ──────────────────────────────────
+    const previewChannel = new BroadcastChannel('kwabz_theme_preview');
+
+    function updatePreview() {
+      const data = getThemeData();
+      console.log('[Theme] Broadcasting update:', data);
+
+      // 1. Send via BroadcastChannel (modern, reliable for same-origin)
+      previewChannel.postMessage(data);
+
+      // 2. Fallback: Send directly to iframe if available
+      const frame = document.getElementById('previewFrame');
+      if (frame && frame.contentWindow) {
+        frame.contentWindow.postMessage(data, '*');
+      }
+    }
+
+    // Listen for iframe ready signal (to sync immediately on load)
+    window.addEventListener('message', (event) => {
+      if (event.data === 'PREVIEW_READY') {
+        console.log('[Theme] Preview iframe is ready. Broadcasting sync.');
+        updatePreview();
+      }
+    });
+
+    function toggleLogoFields() {
+      const type = document.getElementById('logoType').value;
+      const textGroup = document.getElementById('logoTextGroup');
+      const imgGroup = document.getElementById('logoImageGroup');
+      if (textGroup && imgGroup) {
+        if (type === 'image') {
+          textGroup.style.display = 'none';
+          imgGroup.style.display = 'block';
+        } else {
+          textGroup.style.display = 'block';
+          imgGroup.style.display = 'none';
+        }
+      }
+    }
+
+    function loadTheme() {
+      const settings = KwabzStore.getSettings() || {};
+      const theme = settings.theme || {};
+
+      const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.value = val;
+      };
+
+      setVal('logoType', theme.logoType || 'text');
+      setVal('logoText', theme.logoText || 'Kwabz Store');
+      setVal('logoImageUrl', theme.logoImageUrl || '');
+      toggleLogoFields();
+      setVal('heroTitle', theme.heroTitle || '');
+      setVal('heroDesc', theme.heroDesc || '');
+      setVal('heroTag', theme.heroTag || '');
+      setVal('ctaText', theme.ctaText || '');
+      setVal('fontFamily', theme.fontFamily || "'Inter', sans-serif");
+      setVal('heroFontSize', theme.heroFontSize || 5);
+      setVal('glassOpacity', theme.glassOpacity || 0.8);
+      setVal('heroImage1', theme.heroImage1 || '');
+      setVal('heroImage2', theme.heroImage2 || '');
+      setVal('heroImage3', theme.heroImage3 || '');
+      setVal('broadcastTitle', theme.broadcastTitle || '');
+      setVal('broadcastMessage', theme.broadcastMessage || '');
+      setVal('broadcastWhatsapp', theme.broadcastWhatsapp || '');
+      setVal('broadcastCall', theme.broadcastCall || '');
+      setVal('broadcastSnapchat', theme.broadcastSnapchat || '');
+      setVal('primaryColor', theme.primaryColor || '#000000');
+
+      // Shop
+      setVal('showShopMenu', theme.showShopMenu !== undefined ? String(theme.showShopMenu) : 'true');
+      setVal('showShopHero', theme.showShopHero !== undefined ? String(theme.showShopHero) : 'true');
+      setVal('showMiniStoreFAB', theme.showMiniStoreFAB !== undefined ? String(theme.showMiniStoreFAB) : 'true');
+      setVal('shopHeroTitle', theme.shopHeroTitle || '');
+      setVal('shopHeroDesc', theme.shopHeroDesc || '');
+      setVal('shopHeroImage', theme.shopHeroImage || '');
+      setVal('shopHeroImage2', theme.shopHeroImage2 || '');
+      setVal('shopHeroAlign', theme.shopHeroAlign || 'left');
+      setVal('shopHeroTitleSize', theme.shopHeroTitleSize || '2.75rem');
+      setVal('shopHeroStyle', theme.shopHeroStyle || 'normal');
+      setVal('shopHeroColor', theme.shopHeroColor || '#ffffff');
+      const colorHexEl = document.getElementById('shopHeroColorHex');
+      if (colorHexEl) colorHexEl.value = (theme.shopHeroColor || '#ffffff').toUpperCase();
+      setVal('searchPlaceholder', theme.searchPlaceholder || '');
+      setVal('shopTitle', theme.shopTitle || '');
+      setVal('shopGrid', theme.shopGrid || '4');
+      setVal('sellersLayout', theme.sellersLayout || 'original');
+      setVal('sellersCardBg', theme.sellersCardBg || 'plain');
+      setVal('sellersTitle', theme.sellersTitle || '');
+      setVal('sellersDesc', theme.sellersDesc || '');
+      setVal('sellersBgImage', theme.sellersBgImage || '');
+
+      // Product
+      setVal('buyBtnText', theme.buyBtnText || '');
+      setVal('preOrderBtnText', theme.preOrderBtnText || '');
+      setVal('enablePreOrder', theme.enablePreOrder !== undefined ? String(theme.enablePreOrder) : 'true');
+      setVal('showRelated', theme.showRelated || 'true');
+
+      // Cart
+      setVal('emptyCartMsg', theme.emptyCartMsg || '');
+      setVal('checkoutBtnText', theme.checkoutBtnText || '');
+
+      // Profile
+      setVal('profileGreeting', theme.profileGreeting || '');
+      setVal('orderHistoryTitle', theme.orderHistoryTitle || '');
+
+      // Splash & PWA
+      setVal('splashStoreName', theme.splashStoreName || '');
+      setVal('splashBgImage', theme.splashBgImage || '');
+      setVal('splashFavicon', theme.splashFavicon || '');
+      setVal('splashLoaderColor', theme.splashLoaderColor || '#8b0000');
+      setVal('splashLoaderStyle', theme.splashLoaderStyle || 'metallic');
+      setVal('authLoginImage', theme.authLoginImage || '');
+      setVal('authSignupImage', theme.authSignupImage || '');
+      setVal('storeWhatsapp', theme.storeWhatsapp || '233553866329');
+
+      // Widget Card checkboxes
+      const widgetCards = theme.widgetCards || ['orders', 'revenue', 'commission', 'pending', 'delivered', 'cancelled', 'products', 'presence', 'reads'];
+      document.querySelectorAll('.widget-card-checkbox').forEach(cb => {
+        cb.checked = widgetCards.includes(cb.value);
+      });
+
+      updatePreview();
+    }
+
+    function clearBroadcasts() {
+      if (!confirm('Are you sure you want to clear all broadcast title, message, and social links?')) return;
+
+      const fields = ['broadcastTitle', 'broadcastMessage', 'broadcastWhatsapp', 'broadcastCall', 'broadcastSnapchat'];
+      fields.forEach(f => {
+        const el = document.getElementById(f);
+        if (el) el.value = '';
+      });
+
+      updatePreview();
+      KwabzUtils.toast('Broadcast fields cleared. Press "Save Changes" to apply.', 'info');
+    }
+
+    function compressThemeImage(file, maxDim = 1200, quality = 0.7) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const img = new Image();
+          img.onload = function() {
+            let width = img.width;
+            let height = img.height;
+            if (width > maxDim || height > maxDim) {
+              if (width > height) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+              } else {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            // Output as compressed JPEG data URL
+            const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+            resolve(compressedDataUrl);
+          };
+          img.onerror = () => reject(new Error('Failed to load image element'));
+          img.src = e.target.result;
+        };
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function handleImageUpload(e, inputId) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        KwabzUtils.toast('Optimizing image for fast load times...', 'info');
+        const compressedDataUrl = await compressThemeImage(file, 800, 0.6);
+        
+        document.getElementById(inputId).value = compressedDataUrl;
+        updatePreview();
+        KwabzUtils.toast('Image optimized and ready!', 'success');
+      } catch (err) {
+        console.error('[Theme] Upload error:', err);
+        KwabzUtils.toast('Failed to process image: ' + err.message, 'error');
+      }
+    }
+
+    async function saveTheme() {
+      const btn = document.querySelector('button[type="submit"]');
+      const originalText = btn.textContent;
+
+      try {
+        console.log('[Theme] Attempting save with data:', getThemeData());
+        btn.disabled = true;
+        btn.textContent = 'Applying...';
+        KwabzUtils.toast('Applying theme to live store...', 'info');
+
+        const themeData = getThemeData();
+        themeData.appVersion = 'v_' + Date.now();
+
+        await KwabzStore.updateSettings({ theme: themeData });
+        KwabzUtils.toast('Theme applied successfully!', 'success');
+      } catch (err) {
+        console.error('[Theme] Save Failed:', err);
+        KwabzUtils.toast('Save failed: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+
+    function setPreviewSize(mode) {
+      const container = document.getElementById('previewContainer');
+      const btnMobile = document.getElementById('btnMobile');
+      const btnDesktop = document.getElementById('btnDesktop');
+
+      if (mode === 'mobile') {
+        container.style.width = '375px';
+        container.style.borderRadius = '2.5rem';
+        btnMobile.style.background = 'var(--primary)';
+        btnMobile.style.color = 'white';
+        btnDesktop.style.background = 'transparent';
+        btnDesktop.style.color = 'var(--on-surface-variant)';
+      } else {
+        container.style.width = '100%';
+        container.style.borderRadius = '1rem';
+        btnDesktop.style.background = 'var(--primary)';
+        btnDesktop.style.color = 'white';
+        btnMobile.style.background = 'transparent';
+        btnMobile.style.color = 'var(--on-surface-variant)';
+      }
+      updatePreview();
+    }
+
+    function bindListeners() {
+      const inputs = document.querySelectorAll('input, select, textarea');
+      console.log(`[Theme] Binding listeners to ${inputs.length} elements.`);
+      inputs.forEach(el => {
+        el.addEventListener('input', updatePreview);
+        el.addEventListener('change', updatePreview);
+      });
+
+      const colorInput = document.getElementById('primaryColor');
+      const hexSpan = document.getElementById('primaryHex');
+      if (colorInput && hexSpan) {
+        colorInput.addEventListener('input', (e) => {
+          hexSpan.textContent = e.target.value.toUpperCase();
+        });
+      }
+
+      const heroColor = document.getElementById('shopHeroColor');
+      const heroColorHex = document.getElementById('shopHeroColorHex');
+      if (heroColor && heroColorHex) {
+        heroColor.addEventListener('input', (e) => {
+          heroColorHex.value = e.target.value.toUpperCase();
+        });
+        heroColorHex.addEventListener('input', (e) => {
+          if (e.target.value.startsWith('#') && e.target.value.length === 7) {
+            heroColor.value = e.target.value;
+          }
+        });
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      bindListeners();
+      KwabzStore.on('settings_changed', loadTheme);
+      KwabzStore.on('settings_write_failed', (err) => {
+        KwabzUtils.toast('Firestore save failed: ' + err.message, 'error');
+      });
+    });
+  </script>
+</body>
+
+</html>

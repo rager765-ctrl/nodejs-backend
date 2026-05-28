@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Diagnostics — Kwabz Store Admin</title>
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .diag-card {
+      background: var(--surface-container-low);
+      border-radius: var(--radius-2xl);
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .diag-card--primary {
+      background: linear-gradient(135deg, var(--primary), var(--secondary));
+      color: var(--on-primary);
+    }
+    .diag-card__label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      opacity: 0.8;
+    }
+    .diag-card__value {
+      font-family: var(--font-headline);
+      font-size: 1.75rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+    .chart-bar-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .chart-bar-container {
+      height: 0.5rem;
+      background: var(--surface-container-highest);
+      border-radius: 100px;
+      overflow: hidden;
+    }
+    .chart-bar-fill {
+      height: 100%;
+      background: var(--primary);
+      border-radius: 100px;
+      transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* ─── Print & Report Styles ─── */
+    @media print {
+      body { background: white; padding: 0; margin: 0; }
+      .top-app-bar, .icon-btn, .export-section, footer { display: none !important; }
+      .page-content--admin { padding: 0 !important; margin: 0 !important; }
+      .diag-card { border: 1px solid #eee; box-shadow: none; break-inside: avoid; }
+      #printableReport { display: block !important; }
+    }
+
+    #printableReport {
+      display: none;
+      padding: 3rem;
+      background: white;
+      color: black;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══ Top App Bar ═══ -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <a href="admin-dashboard.html" class="icon-btn">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </a>
+      <span class="top-app-bar__title font-headline">Diagnostics</span>
+    </div>
+    <div class="top-app-bar__actions">
+      <div id="syncStatus" style="font-size:0.625rem;font-weight:800;letter-spacing:0.05em;padding:0.25rem 0.6rem;border-radius:1rem;margin-right:0.75rem;transition:all 0.3s;display:flex;align-items:center;gap:0.25rem;">
+        <!-- Status injected by JS -->
+      </div>
+      <button class="icon-btn" onclick="KwabzStore.refreshAll(); location.reload();" title="Refresh Sync">
+        <span class="material-symbols-outlined">sync</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="page-content page-content--admin">
+
+    <div style="margin-bottom:2.5rem;">
+      <p class="text-label-md" style="color:var(--outline);margin-bottom:0.25rem;">Business Intelligence</p>
+      <h2 class="font-headline text-headline-lg">Store Insights</h2>
+    </div>
+
+    <!-- Main Stats Grid -->
+    <div style="display:grid;grid-template-columns:1fr;gap:1.25rem;margin-bottom:2.5rem;">
+      <div class="diag-card diag-card--primary">
+        <p class="diag-card__label">Total Cash Inflow</p>
+        <p id="totalRevenue" class="diag-card__value">GH₵0.00</p>
+        <div style="display:flex;justify-content:space-between;font-size:0.75rem;margin-top:1rem;opacity:0.9;">
+          <span>Potential (Unpaid)</span>
+          <span id="unpaidRevenue" style="font-weight:700;">GH₵0.00</span>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;">
+        <div class="diag-card">
+          <p class="diag-card__label">Avg Order</p>
+          <p id="avgOrderValue" class="diag-card__value" style="font-size:1.25rem;">GH₵0.00</p>
+        </div>
+        <div class="diag-card">
+          <p class="diag-card__label">Delivered</p>
+          <p id="deliveredRevenue" class="diag-card__value" style="font-size:1.25rem;">GH₵0.00</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Center Section -->
+    <section class="export-section" style="margin-bottom:3rem;">
+      <h3 class="section-header">Financial Exports</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <button onclick="downloadOrdersCSV()" class="btn-primary" style="display:flex;align-items:center;justify-content:center;gap:0.75rem;padding:1.25rem;background:var(--surface-container-highest);color:var(--on-surface);">
+          <span class="material-symbols-outlined">table_view</span>
+          <span style="font-weight:700;">Export as CSV</span>
+        </button>
+        <button onclick="generatePDFReport()" class="btn-primary" style="display:flex;align-items:center;justify-content:center;gap:0.75rem;padding:1.25rem;">
+          <span class="material-symbols-outlined">picture_as_pdf</span>
+          <span style="font-weight:700;">Generate PDF</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Category Performance -->
+    <section style="margin-bottom:3rem;">
+      <h3 class="section-header">Category Performance</h3>
+      <div id="categoryStats" style="background:var(--surface-container-low);border-radius:var(--radius-2xl);padding:1.5rem;">
+        <!-- Rendered by JS -->
+      </div>
+    </section>
+
+    <!-- Top Products -->
+    <section>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:1.5rem;">
+        <h3 class="section-header" style="margin-bottom:0;">Top Selling Products</h3>
+      </div>
+      <div id="topProducts" style="display:flex;flex-direction:column;gap:1rem;">
+        <!-- Rendered by JS -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ═══ Admin Bottom Nav ═══ -->
+  <nav class="bottom-nav-admin">
+    <a href="admin-dashboard.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">dashboard</span>
+      <span>Stats</span>
+    </a>
+    <a href="admin-products.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">inventory_2</span>
+      <span>Products</span>
+    </a>
+    <a href="admin-diagnostics.html" class="bottom-nav-admin__item active">
+      <span class="material-symbols-outlined filled" style="font-size:1.25rem;">query_stats</span>
+      <span>Insights</span>
+    </a>
+    <a href="admin-orders.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">receipt_long</span>
+      <span>Orders</span>
+    </a>
+  </nav>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="../store.js"></script>
+  <script src="../utils.js"></script>
+  <script type="module" src="../shell.js"></script>
+  <script>
+    window._kwabzReadyCallbacks = window._kwabzReadyCallbacks || [];
+    function _onStoreReady(fn) {
+      if (window._kwabzStoreReady) { fn(); }
+      else { window._kwabzReadyCallbacks.push(fn); }
+    }
+
+    _onStoreReady(() => {
+      if (typeof KwabzUtils !== 'undefined') {
+        KwabzUtils.requireAdmin();
+      }
+
+      KwabzStore.on('sync_status', (status) => {
+        updateSyncBadge(status);
+        renderDiagnostics();
+      });
+
+      // Add spin animation class
+      const style = document.createElement('style');
+      style.textContent = `@keyframes hubSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } .loading-spin-anim { animation: hubSpin 2s linear infinite; }`;
+      document.head.appendChild(style);
+
+      updateSyncBadge(KwabzStore.getSyncStatus());
+
+      // Initial render with cached data, then reactively re-render
+      renderDiagnostics();
+
+      KwabzStore.on('orders_changed', () => renderDiagnostics());
+      KwabzStore.on('products_changed', () => renderDiagnostics());
+    });
+
+
+    function updateSyncBadge(status) {
+      const badge = document.getElementById('syncStatus');
+      if (!badge) return;
+      const states = {
+        syncing: { text: 'SYNCING', color: 'var(--primary)', bg: 'var(--surface-container-highest)', icon: 'sync' },
+        online: { text: 'LIVE', color: '#166534', bg: '#dcfce7', icon: 'database' },
+        offline: { text: 'OFFLINE', color: 'var(--outline)', bg: 'var(--surface-container-high)', icon: 'cloud_off' }
+      };
+      const s = states[status] || states.offline;
+      badge.style.color = s.color;
+      badge.style.background = s.bg;
+      badge.innerHTML = `<span class="material-symbols-outlined ${status === 'syncing' ? 'loading-spin-anim' : ''}" style="font-size:0.875rem;">${s.icon}</span> ${s.text}`;
+    }
+
+    // Add spin animation class
+    const style = document.createElement('style');
+    style.textContent = `@keyframes hubSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } .loading-spin-anim { animation: hubSpin 2s linear infinite; }`;
+    document.head.appendChild(style);
+
+    updateSyncBadge(KwabzStore.getSyncStatus());
+
+    async function renderDiagnostics() {
+      const orders = KwabzStore.getOrders();
+      const products = KwabzStore.getAllProducts();
+      const categories = KwabzStore.getCategories();
+
+      // 1. Revenue Calculations
+      const totalRev = orders.reduce((s, o) => s + o.total_price, 0);
+      const deliveredRev = orders.filter(o => o.status === 'delivered').reduce((s, o) => s + o.total_price, 0);
+      const unpaidRev = orders.filter(o => ['pending', 'confirmed', 'shipped'].includes(o.status)).reduce((s, o) => s + o.total_price, 0);
+      const aov = orders.length > 0 ? (totalRev / orders.length) : 0;
+
+      document.getElementById('totalRevenue').textContent = KwabzUtils.formatPrice(totalRev);
+      document.getElementById('unpaidRevenue').textContent = KwabzUtils.formatPrice(unpaidRev);
+      document.getElementById('deliveredRevenue').textContent = KwabzUtils.formatPrice(deliveredRev);
+      document.getElementById('avgOrderValue').textContent = KwabzUtils.formatPrice(aov);
+
+      // 2. Category Performance
+      const catCount = {};
+      orders.forEach(o => {
+        o.items.forEach(item => {
+          const prod = products.find(p => p.id === item.product_id);
+          if (prod && prod.category_id) {
+            catCount[prod.category_id] = (catCount[prod.category_id] || 0) + (item.price * item.quantity);
+          }
+        });
+      });
+
+      const catContainer = document.getElementById('categoryStats');
+      if (Object.keys(catCount).length === 0) {
+        catContainer.innerHTML = '<p class="text-label-sm" style="text-align:center;color:var(--outline);">No sales data available</p>';
+      } else {
+        const maxCatRev = Math.max(...Object.values(catCount));
+        catContainer.innerHTML = categories.map(cat => {
+          const rev = catCount[cat.id] || 0;
+          const pct = maxCatRev > 0 ? (rev / maxCatRev) * 100 : 0;
+          return `
+            <div class="chart-bar-row">
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8125rem;">
+                <span style="font-weight:600;">${cat.name}</span>
+                <span style="color:var(--outline);font-weight:700;">${KwabzUtils.formatPrice(rev)}</span>
+              </div>
+              <div class="chart-bar-container">
+                <div class="chart-bar-fill" style="width:${pct}%"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      // 3. Top Products
+      const prodStats = {};
+      orders.forEach(o => {
+        o.items.forEach(item => {
+          if (!prodStats[item.product_id]) {
+            prodStats[item.product_id] = { name: item.name, img: item.image_url, qty: 0, rev: 0 };
+          }
+          prodStats[item.product_id].qty += item.quantity;
+          prodStats[item.product_id].rev += (item.price * item.quantity);
+        });
+      });
+
+      const topProds = Object.values(prodStats).sort((a,b) => b.rev - a.rev).slice(0, 5);
+      const prodContainer = document.getElementById('topProducts');
+      
+      if (topProds.length === 0) {
+        prodContainer.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--outline);">Soon...</div>';
+      } else {
+        prodContainer.innerHTML = topProds.map((p, idx) => `
+          <div style="display:flex;align-items:center;gap:1rem;background:var(--surface-container-low);padding:1rem;border-radius:var(--radius-xl);">
+            <div style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;background:var(--primary-container);color:var(--primary);border-radius:50%;font-weight:900;font-size:0.875rem;">${idx+1}</div>
+            <img src="${p.img}" style="width:3rem;height:3rem;border-radius:var(--radius-lg);object-fit:cover;" />
+            <div style="flex:1;">
+              <p style="font-weight:700;font-size:0.875rem;">${p.name}</p>
+              <p style="font-size:0.75rem;color:var(--outline);">${p.qty} sold</p>
+            </div>
+            <div style="text-align:right;">
+              <p style="font-weight:800;font-size:0.9375rem;">${KwabzUtils.formatPrice(p.rev)}</p>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    // ─── Export Logic ──────────────────────────────────────────
+    function downloadOrdersCSV() {
+      const orders = KwabzStore.getOrders();
+      if (orders.length === 0) {
+        KwabzUtils.toast('No orders to export', 'error');
+        return;
+      }
+
+      const headers = ['Order #', 'Customer', 'Phone', 'Address', 'Items Count', 'Total GHS', 'Status', 'Date'];
+      const rows = orders.map(o => [
+        o.order_number,
+        o.customer.name,
+        o.customer.phone,
+        `"${o.customer.address.replace(/\n/g, ' ')}"`, // escape address
+        o.items.length,
+        o.total_price.toFixed(2),
+        o.status.toUpperCase(),
+        new Date(o.created_at).toLocaleDateString()
+      ]);
+
+      let csvContent = "data:text/csv;charset=utf-8," 
+        + headers.join(",") + "\n"
+        + rows.map(r => r.join(",")).join("\n");
+
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `Kwabz_Store_Orders_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      KwabzUtils.toast('CSV Downloaded', 'success');
+    }
+
+    function generatePDFReport() {
+      // Create a temporary printable view
+      const orders = KwabzStore.getOrders();
+      const totalRev = orders.reduce((s, o) => s + o.total_price, 0);
+      const deliveredRev = orders.filter(o => o.status === 'delivered').reduce((s, o) => s + o.total_price, 0);
+
+      const reportHtml = `
+        <div id="printableReport">
+          <div style="text-align:center; margin-bottom:3rem; border-bottom:2px solid black; padding-bottom:1rem;">
+            <h1 style="font-family:var(--font-headline); font-size:2rem;">KWABZ STORE</h1>
+            <p style="text-transform:uppercase; letter-spacing:0.2em; font-size:0.75rem; font-weight:800;">Business Performance Report • ${new Date().toLocaleDateString('en-GB')}</p>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:2rem; margin-bottom:3rem;">
+            <div>
+              <p style="text-transform:uppercase; font-size:0.625rem; font-weight:800; color:#666;">Total Recorded Revenue</p>
+              <p style="font-size:2rem; font-weight:900;">${KwabzUtils.formatPrice(totalRev)}</p>
+            </div>
+            <div>
+              <p style="text-transform:uppercase; font-size:0.625rem; font-weight:800; color:#666;">Realized Revenue (Delivered)</p>
+              <p style="font-size:2rem; font-weight:900;">${KwabzUtils.formatPrice(deliveredRev)}</p>
+            </div>
+          </div>
+
+          <h2 style="font-family:var(--font-headline); font-size:1.25rem; border-bottom:1px solid #eee; padding-bottom:0.5rem; margin-bottom:1.5rem;">Recent Order Activity</h2>
+          <table style="width:100%; border-collapse:collapse; font-size:0.875rem;">
+            <thead>
+              <tr style="text-align:left; border-bottom:1px solid black;">
+                <th style="padding:0.75rem 0;">Order</th>
+                <th>Customer</th>
+                <th>Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${orders.slice(0, 50).map(o => `
+                <tr style="border-bottom:1px solid #f0f0f0;">
+                  <td style="padding:0.75rem 0;">${o.order_number}</td>
+                  <td>${o.customer.name}</td>
+                  <td>${KwabzUtils.formatPrice(o.total_price)}</td>
+                  <td style="text-transform:uppercase; font-size:0.625rem; font-weight:800;">${o.status}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+
+          <div style="margin-top:5rem; text-align:center; font-size:0.625rem; color:#999; font-weight:600; text-transform:uppercase;">
+            Confidential Internal Document • Kwabz Store Online
+          </div>
+        </div>
+      `;
+
+      // Remove existing report if any
+      const existing = document.getElementById('printableReport');
+      if (existing) existing.remove();
+
+      // Append and print
+      document.body.insertAdjacentHTML('beforeend', reportHtml);
+      window.print();
+    }
+  </script>
+</body>
+</html>
+

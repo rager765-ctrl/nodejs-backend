@@ -226,7 +226,9 @@ const KwabzStore = (() => {
                 if (localRole === 'admin') {
                   localStorage.setItem(KEYS.ADMIN_AUTH, 'true');
                   _startPresence(user.uid);
-                  _setupOrdersListener();
+                  if (!useBackend || backendStatus === 'offline') {
+                    _setupOrdersListener();
+                  }
                   emit('admin_ready', currentUser);
                 }
                 emit('user_changed', currentUser);
@@ -255,7 +257,9 @@ const KwabzStore = (() => {
         _setupUserOrdersListener(user.uid);
         if (localRole === 'admin') {
           _startPresence(user.uid);
-          _setupOrdersListener();
+          if (!useBackend || backendStatus === 'offline') {
+            _setupOrdersListener();
+          }
         }
       } else {
         localStorage.removeItem('kwabz_auth_cache');
@@ -437,17 +441,43 @@ const KwabzStore = (() => {
   let _presenceCacheTs = 0;
   const _PRESENCE_CACHE_TTL = 60 * 1000; // 60 seconds
 
+  let _adminPresenceCallback = null;
+
   function onAdminsPresence(callback) {
+    _adminPresenceCallback = callback;
     if (unsubscribers.presence) unsubscribers.presence();
 
-    // Listen to ALL users with role 'admin'
+    if (useBackend) {
+      // Dummy array mapping so the existing admin HTML count logic works 100% untouched
+      const triggerCallback = (count) => {
+        const dummyAdmins = Array.from({ length: count }, (_, i) => ({
+          id: `admin_${i}`,
+          presence: { last_active: new Date().toISOString() }
+        }));
+        callback(dummyAdmins);
+      };
+      
+      // Default to 1 (current session admin) initially
+      triggerCallback(1);
+      
+      return () => {
+        _adminPresenceCallback = null;
+      };
+    }
+
+    _setupAdminsPresenceListener(callback);
+  }
+
+  function _setupAdminsPresenceListener(callback) {
+    const cb = callback || _adminPresenceCallback;
+    if (!cb) return;
+
     unsubscribers.presence = firebase.firestore().collection('users')
       .where('role', '==', 'admin')
       .onSnapshot(async snapshot => {
         const admins = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
         // THROTTLE: Only re-fetch presence docs if cache is stale (> 60s old).
-        // The users onSnapshot fires frequently — presence barely changes that fast.
         const now = Date.now();
         if (!_presenceCache || (now - _presenceCacheTs) > _PRESENCE_CACHE_TTL) {
           try {
@@ -470,7 +500,7 @@ const KwabzStore = (() => {
           presence: _presenceCache[a.id] || null
         }));
 
-        callback(merged);
+        cb(merged);
       });
   }
 
@@ -787,6 +817,10 @@ const KwabzStore = (() => {
     _setupCategoriesListener();
     _setupSellersListener();
     _setupSettingsListener();
+    if (isAdminLoggedIn()) {
+      _setupOrdersListener();
+      _setupAdminsPresenceListener();
+    }
   }
 
   function _deactivateFirebaseFallback() {
@@ -797,6 +831,8 @@ const KwabzStore = (() => {
     if (unsubscribers.categories) { unsubscribers.categories(); unsubscribers.categories = null; }
     if (unsubscribers.sellers) { unsubscribers.sellers(); unsubscribers.sellers = null; }
     if (unsubscribers.settings) { unsubscribers.settings(); unsubscribers.settings = null; }
+    if (unsubscribers.orders) { unsubscribers.orders(); unsubscribers.orders = null; }
+    if (unsubscribers.presence) { unsubscribers.presence(); unsubscribers.presence = null; }
   }
 
   async function _setupBackendSocket() {
@@ -920,6 +956,16 @@ const KwabzStore = (() => {
       socket.on('visitor_count_updated', (count) => {
         if (typeof _visitorCountCallback === 'function') {
           _visitorCountCallback(count);
+        }
+      });
+
+      socket.on('admin_presence_updated', (count) => {
+        if (typeof _adminPresenceCallback === 'function') {
+          const dummyAdmins = Array.from({ length: count }, (_, i) => ({
+            id: `admin_${i}`,
+            presence: { last_active: new Date().toISOString() }
+          }));
+          _adminPresenceCallback(dummyAdmins);
         }
       });
     } catch (e) {
@@ -1276,6 +1322,15 @@ const KwabzStore = (() => {
     if (syncStatus !== 'syncing') {
       syncStatus = 'syncing';
       emit('sync_status', syncStatus);
+    }
+
+    if (useBackend) {
+      // In backend mode, refresh via background REST and Socket
+      _fetchInitialBackendData().catch(() => {});
+      if (socket && !socket.connected) {
+        socket.connect();
+      }
+      return;
     }
 
     // Reset sync flags for fresh confirmation

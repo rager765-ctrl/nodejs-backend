@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Admin Login — Kwabz Store</title>
+  <link rel="stylesheet" href="../styles.css" />
+
+  <style>
+    body {
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      background: var(--surface-container-low);
+    }
+
+    .admin-login-card {
+      width: 100%;
+      max-width: 24rem;
+    }
+
+    /* Brand */
+    .brand {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+    .brand__name {
+      font-family: var(--font-headline);
+      font-size: 1.5rem;
+      font-weight: 900;
+      letter-spacing: -0.05em;
+      text-transform: uppercase;
+      margin-bottom: 0.25rem;
+    }
+    .brand__tag {
+      font-size: 0.6875rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      color: var(--outline);
+    }
+
+    /* Card */
+    .login-card {
+      background: var(--surface-container-lowest);
+      border-radius: var(--radius-xl);
+      padding: 2rem;
+      box-shadow: var(--shadow-ambient);
+    }
+    .login-card h2 {
+      font-family: var(--font-headline);
+      font-size: 1.125rem;
+      font-weight: 800;
+      margin-bottom: 0.375rem;
+    }
+    .login-card p.subtitle {
+      font-size: 0.875rem;
+      color: var(--outline);
+      margin-bottom: 2rem;
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.25rem; }
+    .form-group label { font-size: 0.6875rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--outline); }
+    .form-group input {
+      padding: 0.875rem 1rem;
+      border: 1.5px solid var(--outline-variant);
+      border-radius: var(--radius-lg);
+      font-size: 0.9375rem;
+      background: var(--surface);
+      color: var(--on-surface);
+      transition: border-color 0.2s;
+      box-sizing: border-box;
+      width: 100%;
+    }
+    .form-group input:focus { outline: none; border-color: var(--primary); }
+
+    .error-box {
+      display: none;
+      padding: 0.875rem 1rem;
+      background: var(--error-container);
+      color: #410002;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      border-radius: var(--radius-lg);
+      margin-bottom: 1.25rem;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .error-box.show { display: flex; }
+
+    .submit-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 1rem;
+      background: var(--primary);
+      color: var(--on-primary);
+      border-radius: var(--radius-lg);
+      font-weight: 800;
+      font-size: 0.9375rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+    }
+    .submit-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .back-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      margin-top: 3rem;
+      font-size: 0.8125rem;
+      color: var(--outline);
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .back-link:hover { color: var(--primary); }
+
+    /* Loading spinner for sync state */
+    .sync-notice {
+      text-align: center;
+      padding: 1rem;
+      color: var(--outline);
+      font-size: 0.8125rem;
+      font-weight: 600;
+      display: none;
+    }
+    .sync-notice.show { display: block; }
+  </style>
+</head>
+
+<body>
+  <div class="admin-login-card">
+    <!-- Brand -->
+    <div class="brand">
+      <h1 class="brand__name">Kwabz Store</h1>
+      <p class="brand__tag">Admin Portal</p>
+    </div>
+
+    <!-- Login Card -->
+    <div class="login-card">
+      <h2>Welcome back</h2>
+      <p class="subtitle">Sign in to manage your store.</p>
+
+      <p id="syncNotice" class="sync-notice">
+        Connecting to servers…
+      </p>
+
+      <div id="errorBox" class="error-box">
+        <span class="material-symbols-outlined" style="font-size:18px;flex-shrink:0;">error</span>
+        <span id="errorText"></span>
+      </div>
+
+      <form id="adminLoginForm">
+        <div class="form-group">
+          <label for="loginEmail">Email</label>
+          <input id="loginEmail" type="email" placeholder="admin@kwabzstore.com" required autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Password</label>
+          <input id="loginPassword" type="password" placeholder="••••••••" required autocomplete="current-password" />
+        </div>
+
+        <button type="submit" class="submit-btn" id="loginBtn">
+          Sign In
+          <span class="material-symbols-outlined" style="font-size:1.125rem;">arrow_forward</span>
+        </button>
+      </form>
+
+      <!-- Trust signals and secure badge to resolve phishing warnings -->
+      <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; background: rgba(0,0,0,0.03); padding: 0.75rem 1rem; border-radius: var(--radius-lg); margin-top: 1.5rem; margin-bottom: 0.5rem;">
+        <span class="material-symbols-outlined" style="font-size: 1.125rem; color: #2e7d32;">verified_user</span>
+        <span style="font-size: 0.65rem; font-weight: 700; color: var(--outline); text-transform: uppercase; letter-spacing: 0.05em;">🛡️ Secured by SSL & Firebase Auth</span>
+      </div>
+    </div>
+
+    <!-- Back to store -->
+    <a href="shop.html" class="back-link">
+      <span class="material-symbols-outlined" style="font-size:1rem;">arrow_back</span>
+      Back to Store
+    </a>
+  </div>
+
+  <!-- Firebase Scripts — Auth MUST load before Firestore -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="store.js?v=2.4.9"></script>
+  <script src="utils.js?v=2.4.9"></script>
+  <script type="module" src="shell.js?v=2.4.9"></script>
+  <script>
+    // ─── Error helpers ────────────────────────────────────────────
+    function getAdminAuthError(err) {
+      const code = err.code || '';
+      const msg  = err.message || '';
+      if (code.includes('user-not-found') || code.includes('invalid-email'))
+        return 'No account found with this email address.';
+      if (code.includes('wrong-password') || code.includes('invalid-credential') || code.includes('invalid-login-credentials'))
+        return 'Incorrect password. Please try again.';
+      if (code.includes('too-many-requests'))
+        return 'Too many failed attempts. Please wait a few minutes.';
+      if (code.includes('user-disabled'))
+        return 'This account has been disabled.';
+      if (code.includes('network-request-failed'))
+        return 'Network error. Check your internet connection.';
+      // Custom message from adminLogin (e.g., "Access denied. You do not have administrator privileges.")
+      if (msg.includes('administrator') || msg.includes('Access denied') || msg.includes('privileges'))
+        return msg;
+      return msg || 'Sign in failed. Please try again.';
+    }
+
+    function showError(message) {
+      document.getElementById('errorText').textContent = message;
+      document.getElementById('errorBox').classList.add('show');
+    }
+
+    function hideError() {
+      document.getElementById('errorBox').classList.remove('show');
+    }
+
+    function setLoading(loading) {
+      const btn = document.getElementById('loginBtn');
+      btn.disabled = loading;
+      btn.innerHTML = loading
+        ? 'Signing in…'
+        : 'Sign In <span class="material-symbols-outlined" style="font-size:1.125rem;">arrow_forward</span>';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+
+      // ─── Auto-redirect if already logged in as admin ──────────
+      // We check ONLY after auth state is known — not from stale localStorage
+      function checkAndRedirect() {
+        // localRole === 'admin' is the only reliable in-memory check
+        if (KwabzStore.isAdminLoggedIn() && KwabzStore.getCurrentUser()) {
+          window.location.replace('admin-dashboard.html');
+          return true;
+        }
+        return false;
+      }
+
+      // If already synced and admin, go immediately
+      if (KwabzStore.getSyncStatus() !== 'syncing') {
+        if (checkAndRedirect()) return;
+      } else {
+        // Show connecting notice while Firebase auth resolves
+        document.getElementById('syncNotice').classList.add('show');
+      }
+
+      // Listen for auth state resolution
+      KwabzStore.on('sync_status', (status) => {
+        if (status !== 'syncing') {
+          document.getElementById('syncNotice').classList.remove('show');
+        }
+      });
+
+      // Only redirect on user_changed if the user IS an admin
+      // This prevents a non-admin user_changed from causing a broken redirect
+      KwabzStore.on('user_changed', (user) => {
+        if (user && KwabzStore.isAdminLoggedIn()) {
+          window.location.replace('admin-dashboard.html');
+        }
+      });
+
+      // ─── Form Submit ──────────────────────────────────────────
+      document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideError();
+
+        const email    = document.getElementById('loginEmail').value.trim();
+        const password = document.getElementById('loginPassword').value;
+
+        if (!email || !password) { showError('Please enter your email and password.'); return; }
+
+        setLoading(true);
+
+        try {
+          await KwabzStore.adminLogin(email, password);
+          // adminLogin only resolves if the user is admin — redirect will happen
+          // via the user_changed listener above, but we force it here too as a fallback.
+          window.location.replace('admin-dashboard.html');
+        } catch (err) {
+          console.error('[AdminLogin]', err);
+          showError(getAdminAuthError(err));
+          setLoading(false);
+        }
+      });
+    });
+  </script>
+</body>
+
+</html>
+

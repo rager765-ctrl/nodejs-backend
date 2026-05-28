@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Orders — Kwabz Store Admin</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+
+  <!-- ═══ Top App Bar ═══ -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <a href="admin-dashboard.html" class="icon-btn">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </a>
+      <span class="top-app-bar__title font-headline">Orders</span>
+    </div>
+  </header>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="page-content page-content--admin">
+
+    <div style="margin-bottom:2rem;">
+      <p class="text-label-md" style="color:var(--outline);margin-bottom:0.25rem;">Operations</p>
+      <h2 class="font-headline text-headline-lg">Order Management</h2>
+    </div>
+
+    <!-- Filter Chips -->
+    <div class="category-pills" style="margin-bottom:1.5rem;" id="statusFilters">
+      <button class="category-pill active" data-status="all">All</button>
+      <button class="category-pill" data-status="pending">Pending</button>
+      <button class="category-pill" data-status="confirmed">Confirmed</button>
+      <button class="category-pill" data-status="shipped">Shipped</button>
+      <button class="category-pill" data-status="delivered">Delivered</button>
+    </div>
+
+    <!-- Order Count -->
+    <p class="text-label-md" style="color:var(--outline);margin-bottom:1rem;"><span id="orderCount">0</span> ORDERS</p>
+
+    <!-- Order List -->
+    <div id="orderList" style="display:flex;flex-direction:column;gap:1rem;"></div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="empty-state" style="display:none;">
+      <span class="material-symbols-outlined empty-state__icon">receipt_long</span>
+      <p class="empty-state__title">No orders found</p>
+      <p class="empty-state__text">Orders will appear here when customers place them via the store or WhatsApp.</p>
+    </div>
+
+  </main>
+
+  <!-- ═══ Order Detail Modal ═══ -->
+  <div class="modal-overlay" id="orderDetailModal" onclick="if(event.target===this) this.classList.remove('open')">
+    <div class="modal-content" style="max-height:90dvh;">
+      <div class="modal-handle"></div>
+      <div id="orderDetailContent"></div>
+    </div>
+  </div>
+
+  <!-- ═══ Admin Bottom Nav ═══ -->
+  <nav class="bottom-nav-admin">
+    <a href="admin-dashboard.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">dashboard</span>
+      <span>Stats</span>
+    </a>
+    <a href="admin-products.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">inventory_2</span>
+      <span>Products</span>
+    </a>
+    <a href="admin-diagnostics.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">query_stats</span>
+      <span>Insights</span>
+    </a>
+    <a href="admin-sellers.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">storefront</span>
+      <span>Sellers</span>
+    </a>
+    <a href="admin-orders.html" class="bottom-nav-admin__item active">
+      <span class="material-symbols-outlined filled" style="font-size:1.25rem;">receipt_long</span>
+      <span>Orders</span>
+    </a>
+  </nav>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="../store.js"></script>
+  <script src="../utils.js"></script>
+  <script type="module" src="../shell.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (!KwabzUtils.requireAdmin()) return;
+
+      let activeStatus = 'all';
+
+      // ─── Status Config ────────────────────────────────────────
+      const STATUS_CONFIG = {
+        pending:   { label: 'Pending',   icon: 'schedule',       chipClass: 'chip--warning',  next: 'confirmed' },
+        confirmed: { label: 'Confirmed', icon: 'check_circle',   chipClass: 'chip--primary',  next: 'shipped' },
+        shipped:   { label: 'Shipped',   icon: 'local_shipping', chipClass: 'chip--surface',  next: 'delivered' },
+        delivered: { label: 'Delivered', icon: 'done_all',       chipClass: 'chip--success',  next: null },
+        cancelled: { label: 'Cancelled', icon: 'cancel',         chipClass: 'chip--error',    next: null },
+      };
+
+      // ─── Filter Chips ─────────────────────────────────────────
+      document.getElementById('statusFilters').addEventListener('click', (e) => {
+        const pill = e.target.closest('.category-pill');
+        if (!pill) return;
+        activeStatus = pill.dataset.status;
+        document.querySelectorAll('#statusFilters .category-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        renderOrders();
+      });
+
+      // ─── Render Orders ────────────────────────────────────────
+      function renderOrders() {
+        let orders = KwabzStore.getOrders();
+        if (activeStatus !== 'all') orders = orders.filter(o => o.status === activeStatus);
+
+        const container = document.getElementById('orderList');
+        const empty = document.getElementById('emptyState');
+        document.getElementById('orderCount').textContent = orders.length;
+
+        if (orders.length === 0) {
+          container.innerHTML = '';
+          empty.style.display = 'flex';
+          return;
+        }
+        empty.style.display = 'none';
+
+        container.innerHTML = orders.map(order => {
+          const config = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
+          const itemCount = order.items.reduce((sum, i) => sum + i.quantity, 0);
+          
+          const isMiniStore = order.seller_id && order.seller_id !== 'main';
+          const sellerBadge = isMiniStore 
+            ? `<span style="background:var(--surface-container-high);color:var(--primary);padding:0.15rem 0.5rem;font-size:0.625rem;border-radius:100px;font-weight:700;display:inline-flex;align-items:center;gap:0.25rem;">
+                <span class="material-symbols-outlined" style="font-size:0.75rem;">storefront</span> ${order.seller_name || 'Mini-Store'}
+               </span>`
+            : '';
+          
+          const commissionBadge = (isMiniStore && typeof order.admin_commission === 'number')
+            ? `<p style="font-size:0.7rem;color:#166534;font-weight:700;margin-top:0.25rem;display:flex;align-items:center;gap:0.15rem;justify-content:flex-end;">
+                <span class="material-symbols-outlined" style="font-size:0.8rem;">payments</span> Comm: +${KwabzUtils.formatPrice(order.admin_commission)}
+               </p>`
+            : '';
+
+          return `
+            <div style="background:var(--surface-container-lowest);border-radius:var(--radius-xl);padding:1.25rem;box-shadow:var(--shadow-soft);cursor:pointer;"
+              onclick="showOrderDetail('${order.id}')">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.75rem;">
+                <div>
+                  <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                    <p class="font-headline" style="font-weight:700;font-size:1rem;margin:0;">${order.order_label || order.order_number}</p>
+                    ${sellerBadge}
+                  </div>
+                  <p style="font-size:0.6875rem;color:var(--outline);margin-top:0.25rem;">${KwabzUtils.formatDate(order.created_at)} • ${KwabzUtils.timeAgo(order.created_at)}</p>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:0.35rem;align-items:flex-end;">
+                  <span class="chip ${config.chipClass}">
+                    <span class="material-symbols-outlined" style="font-size:0.75rem;">${config.icon}</span>
+                    ${config.label}
+                  </span>
+                  ${order.hidden_by_customer ? `
+                    <span class="chip" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:0.2rem 0.5rem;font-size:0.625rem;display:inline-flex;align-items:center;gap:0.25rem;border-radius:100px;font-weight:700;">
+                      <span class="material-symbols-outlined" style="font-size:0.75rem;">visibility_off</span> Deleted by User
+                    </span>
+                  ` : ''}
+                </div>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <p style="font-size:0.8125rem;font-weight:600;">${order.customer?.name || 'Guest'}</p>
+                  <p style="font-size:0.6875rem;color:var(--outline);">${itemCount} item${itemCount !== 1 ? 's' : ''}</p>
+                </div>
+                <div style="text-align:right;">
+                  <span class="font-headline" style="font-weight:800;font-size:1.125rem;display:block;">${KwabzUtils.formatPrice(order.total_price)}</span>
+                  ${commissionBadge}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      // ─── Order Detail ─────────────────────────────────────────
+      function showOrderDetail(orderId) {
+        const order = KwabzStore.getOrders().find(o => o.id === orderId);
+        if (!order) return;
+        const config = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
+        const content = document.getElementById('orderDetailContent');
+        content.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.5rem;">
+            <div>
+              <h3 class="font-headline text-headline-md">${order.order_label || order.order_number}</h3>
+              <p class="text-body-sm" style="color:var(--outline);">${KwabzUtils.formatDate(order.created_at)}</p>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:0.35rem;align-items:flex-end;">
+              <span class="chip ${config.chipClass}">
+                <span class="material-symbols-outlined" style="font-size:0.75rem;">${config.icon}</span>
+                ${config.label}
+              </span>
+              ${order.hidden_by_customer ? `
+                <span class="chip" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:0.2rem 0.5rem;font-size:0.625rem;display:inline-flex;align-items:center;gap:0.25rem;border-radius:100px;font-weight:700;">
+                  <span class="material-symbols-outlined" style="font-size:0.75rem;">visibility_off</span> Deleted/Hidden by User
+                </span>
+              ` : ''}
+            </div>
+          </div>
+          <div style="background:var(--surface-container-low);border-radius:var(--radius-lg);padding:1rem;margin-bottom:1.5rem;">
+            <p class="text-label-sm" style="color:var(--outline);margin-bottom:0.75rem;">CUSTOMER</p>
+            <p style="font-weight:600;font-size:0.9375rem;margin-bottom:0.25rem;">${order.customer?.name || 'Guest'}</p>
+            <p style="font-size:0.8125rem;color:var(--on-surface-variant);">📞 ${order.customer?.phone || ''}</p>
+            <p style="font-size:0.8125rem;color:var(--on-surface-variant);">📍 ${order.customer?.address || ''}</p>
+          </div>
+          <div style="margin-bottom:1.5rem;">
+            <p class="text-label-sm" style="color:var(--outline);margin-bottom:0.75rem;">ITEMS</p>
+            ${(order.items || []).map(item => {
+              const hasDiscount = item.discount > 0 || (item.original_price && item.original_price > item.price);
+              const origPrice = item.original_price || item.price;
+              const discPrice = item.price;
+              const savings = hasDiscount ? ((origPrice - discPrice) * item.quantity) : 0;
+              const discPct = hasDiscount ? (item.discount || Math.round((1 - discPrice/origPrice)*100)) : 0;
+              return `
+              <div style="display:flex;align-items:center;gap:0.75rem;padding:0.625rem 0;border-bottom:1px solid var(--outline-variant);">
+                <img src="${item.image_url}" alt="${item.name}" style="width:2.5rem;height:2.5rem;border-radius:var(--radius-md);object-fit:cover;flex-shrink:0;" />
+                <div style="flex:1;min-width:0;">
+                  <p style="font-weight:600;font-size:0.8125rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.name}</p>
+                  <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.15rem;flex-wrap:wrap;">
+                    <p style="font-size:0.6875rem;color:var(--outline);">Qty: ${item.quantity}</p>
+                    ${hasDiscount ? `<span style="font-size:0.6rem;font-weight:800;background:#dcfce7;color:#166534;padding:0.1rem 0.4rem;border-radius:100px;">-${discPct}%</span>` : ''}
+                  </div>
+                  ${hasDiscount ? `<p style="font-size:0.6875rem;color:var(--outline);text-decoration:line-through;">${KwabzUtils.formatPrice(origPrice)} each</p>` : ''}
+                </div>
+                <div style="text-align:right;flex-shrink:0;">
+                  <span style="font-weight:700;font-size:0.8125rem;display:block;">${KwabzUtils.formatPrice(discPrice * item.quantity)}</span>
+                  ${hasDiscount ? `<span style="font-size:0.625rem;color:#10b981;font-weight:700;">saved ${KwabzUtils.formatPrice(savings)}</span>` : ''}
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
+          <div style="background:var(--surface-container-low);border-radius:var(--radius-lg);padding:1rem;margin-bottom:0.75rem;display:flex;flex-direction:column;gap:0.4rem;">
+            ${(() => {
+              const total = order.total_price || 0;
+              const deliveryFee = order.delivery_fee || 0;
+              const subtotal = total - deliveryFee;
+              const totalSavings = (order.items||[]).reduce((s,i) => {
+                const orig = i.original_price || i.price;
+                return s + ((orig - i.price) * i.quantity);
+              }, 0);
+              
+              let rowsHtml = `
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:0.8125rem;color:var(--outline);font-weight:600;">Subtotal</span>
+                <span style="font-size:0.8125rem;font-weight:700;color:var(--on-surface);">${KwabzUtils.formatPrice(subtotal)}</span>
+              </div>`;
+              
+              if (deliveryFee > 0) {
+                rowsHtml += `
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <span style="font-size:0.8125rem;color:var(--outline);font-weight:600;">Delivery Fee</span>
+                  <span style="font-size:0.8125rem;font-weight:700;color:var(--on-surface);">${KwabzUtils.formatPrice(deliveryFee)}</span>
+                </div>`;
+              }
+              
+              if (totalSavings > 0) {
+                rowsHtml += `
+                <div style="display:flex;justify-content:space-between;align-items:center;color:#10b981;">
+                  <span style="font-size:0.8125rem;font-weight:600;">Total Savings</span>
+                  <span style="font-size:0.8125rem;font-weight:700;">- ${KwabzUtils.formatPrice(totalSavings)}</span>
+                </div>`;
+              }
+              
+              return rowsHtml;
+            })()}
+            <div style="display:flex;justify-content:space-between;align-items:center;padding-top:0.5rem;border-top:1px solid var(--outline-variant);margin-top:0.25rem;">
+              <span class="font-headline" style="font-weight:700;">Total Paid</span>
+              <span class="font-headline" style="font-weight:800;font-size:1.375rem;">${KwabzUtils.formatPrice(order.total_price)}</span>
+            </div>
+          </div>
+          ${(order.items||[]).some(i => i.seller_id && i.seller_id !== 'main') ? (() => {
+            // Use commission_rate stored on the order (set at creation), fall back to seller config, then 10%
+            const commPct = typeof order.commission_rate === 'number'
+              ? order.commission_rate
+              : (() => {
+                  const s = KwabzStore.getSellerById(order.seller_id);
+                  return (s && typeof s.commission === 'number') ? s.commission : 10;
+                })();
+            const commDec = commPct / 100;
+            const adminCut = order.admin_commission ?? parseFloat((order.total_price * commDec).toFixed(2));
+            const sellerCut = parseFloat((order.total_price - adminCut).toFixed(2));
+            return `
+          <div style="background:var(--primary-container);border-radius:var(--radius-lg);padding:1rem;margin-bottom:2rem;">
+            <p class="text-label-sm" style="color:var(--on-primary-container);margin-bottom:0.5rem;text-transform:uppercase;">PLATFORM COMMISSION (${commPct % 1 === 0 ? commPct : commPct.toFixed(2)}%) — ${order.seller_name || 'MINI-STORE'}</p>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-size:0.8125rem;color:var(--on-primary-container);font-weight:500;">Admin Cut from "${order.seller_name || 'Mini-Store'}" Sale</span>
+              <span class="font-headline" style="font-weight:800;font-size:1.125rem;color:var(--primary);">${KwabzUtils.formatPrice(adminCut)}</span>
+            </div>
+            <p style="font-size:0.6875rem;color:var(--on-primary-container);margin-top:0.5rem;opacity:0.7;">${order.seller_name || 'Seller'} receives ${KwabzUtils.formatPrice(sellerCut)}</p>
+          </div>`;
+          })() : `<div style="margin-bottom:2rem;"></div>`}
+
+          <div style="display:flex;flex-direction:column;gap:0.75rem;">
+            ${config.next ? `
+              <button class="btn-primary" onclick="updateStatus('${order.id}', '${config.next}')">
+                <span class="material-symbols-outlined" style="font-size:1.125rem;">${STATUS_CONFIG[config.next].icon}</span>
+                Mark as ${STATUS_CONFIG[config.next].label}
+              </button>
+            ` : order.status !== 'cancelled' ? `
+              <div style="text-align:center;padding:1rem;background:var(--surface-container-low);border-radius:var(--radius-lg);">
+                <span class="material-symbols-outlined" style="color:#166534;font-size:2rem;">task_alt</span>
+                <p class="font-headline" style="font-weight:700;">Order Complete</p>
+              </div>
+            ` : `
+              <div style="text-align:center;padding:1rem;background:var(--error-container);border-radius:var(--radius-lg);">
+                <span class="material-symbols-outlined" style="color:#410002;font-size:2rem;">cancel</span>
+                <p class="font-headline" style="font-weight:700;color:#410002;">Cancelled</p>
+              </div>
+            `}
+            <button class="btn-whatsapp" onclick="notifyCustomer('${order.id}')" style="font-size:0.875rem;padding:1rem;">
+              <span class="material-symbols-outlined" style="font-size:1.25rem;">notifications_active</span>
+              Notify Customer via WhatsApp
+            </button>
+            <div style="margin-top:0.5rem;padding-top:1rem;border-top:1px solid var(--outline-variant);">
+              <button onclick="confirmDeleteOrder('${order.id}', '${order.order_label || order.order_number}')"
+                style="width:100%;padding:0.875rem;border-radius:var(--radius-lg);background:var(--error-container);color:#410002;font-weight:700;font-size:0.8125rem;display:flex;align-items:center;justify-content:center;gap:0.5rem;">
+                <span class="material-symbols-outlined" style="font-size:1rem;">delete_forever</span>
+                Delete Order Permanently
+              </button>
+            </div>
+          </div>
+        `;
+        document.getElementById('orderDetailModal').classList.add('open');
+      }
+
+      // Make showOrderDetail global for onclick
+      window.showOrderDetail = showOrderDetail;
+
+      async function updateStatus(orderId, newStatus) {
+        await KwabzStore.updateOrderStatus(orderId, newStatus);
+        KwabzUtils.toast(`Order marked as ${STATUS_CONFIG[newStatus].label}`);
+        document.getElementById('orderDetailModal').classList.remove('open');
+      }
+      window.updateStatus = updateStatus;
+
+      function confirmDeleteOrder(orderId, orderNumber) {
+        if (!confirm(`⚠️ Permanently delete ${orderNumber}?\n\nThis cannot be undone.`)) return;
+        KwabzStore.deleteOrder(orderId)
+          .then(() => {
+            KwabzUtils.toast(`${orderNumber} deleted`);
+            document.getElementById('orderDetailModal').classList.remove('open');
+          })
+          .catch(err => KwabzUtils.toast('Delete failed: ' + err.message, 'error'));
+      }
+      window.confirmDeleteOrder = confirmDeleteOrder;
+
+      function notifyCustomer(orderId) {
+        const order = KwabzStore.getOrders().find(o => o.id === orderId);
+        if (order) KwabzStore.sendStatusUpdateViaWhatsApp(order);
+      }
+      window.notifyCustomer = notifyCustomer;
+
+      // Render immediately with any cached data available right now
+      renderOrders();
+
+      // ─── Data listeners (Debounced for performance) ──────────
+      const debouncedRender = KwabzUtils.debounce(() => {
+        console.log('[Admin Orders] Batch rendering updates...');
+        renderOrders();
+      }, 50);
+
+      let previousOrders = null;
+      KwabzStore.on('orders_changed', (orders) => {
+        if (previousOrders !== null) {
+          orders.forEach(newOrder => {
+            const oldOrder = previousOrders.find(o => o.id === newOrder.id);
+            if (oldOrder) {
+              if (oldOrder.status !== 'cancelled' && newOrder.status === 'cancelled') {
+                KwabzUtils.toast(`🚨 Order ${newOrder.order_label || newOrder.order_number || ''} was CANCELLED by the customer!`, 'error');
+              }
+              if (!oldOrder.hidden_by_customer && newOrder.hidden_by_customer) {
+                KwabzUtils.toast(`🗑️ Order ${newOrder.order_label || newOrder.order_number || ''} was DELETED/HIDDEN by the customer!`, 'info');
+              }
+            }
+          });
+        }
+        previousOrders = JSON.parse(JSON.stringify(orders));
+        debouncedRender();
+      });
+      KwabzStore.on('admin_ready',    debouncedRender);
+    });
+  </script>
+</body>
+</html>
+

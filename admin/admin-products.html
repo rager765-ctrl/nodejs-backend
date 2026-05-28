@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Manage Products — Kwabz Store Admin</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+
+<body>
+
+  <!-- ═══ Top App Bar ═══ -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <a href="admin-dashboard.html" class="icon-btn">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </a>
+      <span class="top-app-bar__title font-headline">Products</span>
+    </div>
+    <div class="top-app-bar__actions">
+      <a href="admin-add-product.html" class="icon-btn" title="Add Product"
+        style="background:var(--primary);color:var(--on-primary);border-radius:var(--radius-lg);">
+        <span class="material-symbols-outlined" style="font-size:1.25rem;">add</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="page-content page-content--admin">
+
+    <!-- Search & Filter -->
+    <section style="margin-bottom:2rem;">
+      <div style="position:relative;margin-bottom:1rem;">
+        <div style="position:absolute;top:50%;left:1rem;transform:translateY(-50%);pointer-events:none;">
+          <span class="material-symbols-outlined" style="color:var(--outline);font-size:1.25rem;">search</span>
+        </div>
+        <input id="searchInput" type="text" class="minimal-input" placeholder="Search products..."
+          style="padding-left:3rem;border-radius:var(--radius-xl);height:3rem;font-size:0.875rem;border-bottom:none;" />
+      </div>
+      <div class="category-pills" id="filterPills"></div>
+    </section>
+
+    <!-- Product Count -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+      <p class="text-label-md" style="color:var(--outline);"><span id="productCount">0</span> PRODUCTS</p>
+    </div>
+
+    <!-- Product List -->
+    <div class="data-list" id="productList"></div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="empty-state" style="display:none;">
+      <span class="material-symbols-outlined empty-state__icon">inventory_2</span>
+      <p class="empty-state__title">No products found</p>
+      <p class="empty-state__text">Add your first product to get started.</p>
+      <a href="admin-add-product.html" class="btn-primary"
+        style="width:auto;padding:1rem 2rem;margin-top:1.5rem;font-size:0.8125rem;">
+        Add Product
+      </a>
+    </div>
+
+  </main>
+
+  <!-- ═══ Delete Confirmation Modal ═══ -->
+  <div class="modal-overlay" id="deleteModal" onclick="if(event.target===this) this.classList.remove('open')">
+    <div class="modal-content" style="max-width:24rem;border-radius:var(--radius-xl);padding:2rem;">
+      <div class="modal-handle"></div>
+      <h3 class="font-headline text-headline-sm" style="margin-bottom:0.5rem;">Delete Product?</h3>
+      <p class="text-body-sm" style="color:var(--outline);margin-bottom:2rem;">This action cannot be undone. The product
+        will be permanently removed.</p>
+      <div style="display:flex;gap:0.75rem;">
+        <button class="btn-secondary" style="flex:1;"
+          onclick="document.getElementById('deleteModal').classList.remove('open')">Cancel</button>
+        <button class="btn-danger" style="flex:1;" id="confirmDeleteBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Admin Bottom Nav ═══ -->
+  <nav class="bottom-nav-admin">
+    <a href="admin-dashboard.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">dashboard</span>
+      <span>Stats</span>
+    </a>
+    <a href="admin-products.html" class="bottom-nav-admin__item active">
+      <span class="material-symbols-outlined filled" style="font-size:1.25rem;">inventory_2</span>
+      <span>Products</span>
+    </a>
+    <a href="admin-diagnostics.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">query_stats</span>
+      <span>Insights</span>
+    </a>
+    <a href="admin-sellers.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">storefront</span>
+      <span>Sellers</span>
+    </a>
+    <a href="admin-orders.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">receipt_long</span>
+      <span>Orders</span>
+    </a>
+  </nav>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="../store.js"></script>
+  <script src="../utils.js"></script>
+  <script type="module" src="../shell.js"></script>
+  <script>
+    let activeFilter = 'all';
+    let searchQuery = '';
+    let deleteTargetId = null;
+
+    // Initialization wrapper
+    function initAdminPage() {
+      // Guard: require admin
+      if (typeof KwabzUtils !== 'undefined') {
+        KwabzUtils.requireAdmin();
+      }
+
+      renderFilters();
+      renderProducts();
+    }
+
+    window.addEventListener('DOMContentLoaded', initAdminPage);
+
+    // ─── Render Filter Pills ──────────────────────────────────
+    function renderFilters() {
+      const categories = KwabzStore.getCategories();
+      const container = document.getElementById('filterPills');
+      container.innerHTML = `<button class="category-pill ${activeFilter === 'all' ? 'active' : ''}" data-cat="all">All</button>` +
+        categories.map(c => `<button class="category-pill ${activeFilter === c.id ? 'active' : ''}" data-cat="${c.id}">${c.name}</button>`).join('');
+
+      container.querySelectorAll('.category-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          activeFilter = pill.dataset.cat;
+          renderFilters();
+          renderProducts();
+        });
+      });
+    }
+
+    // ─── Render Products ──────────────────────────────────────
+    function renderProducts() {
+      let products = activeFilter === 'all'
+        ? KwabzStore.getAllProducts()
+        : KwabzStore.getAllProductsByCategory(activeFilter);
+
+      console.log('[Admin UI] Products fetched from store:', products);
+
+      if (searchQuery) {
+        products = KwabzStore.searchProducts(searchQuery, 'all');
+      }
+
+      console.log('[Admin UI] Rendering products count:', products.length);
+
+      const container = document.getElementById('productList');
+      const empty = document.getElementById('emptyState');
+      const count = document.getElementById('productCount');
+
+      count.textContent = products.length;
+
+      if (products.length === 0) {
+        container.innerHTML = '';
+        empty.style.display = 'flex';
+        return;
+      }
+
+      empty.style.display = 'none';
+
+      container.innerHTML = products.map(p => {
+        const cat = KwabzStore.getCategoryById(p.category_id);
+        const discountedPrice = KwabzUtils.calcDiscountedPrice(p.price, p.discount);
+        const seller = p.seller_id && p.seller_id !== 'main' ? KwabzStore.getSellerById(p.seller_id) : null;
+
+        return `
+          <div class="data-list__item">
+            <img class="data-list__image" src="${p.image_url || ''}" alt="${p.name}"
+              onerror="this.style.background='var(--surface-container-high)';this.src=''" />
+            <div class="data-list__info">
+              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">
+                <p class="font-headline" style="font-weight:700;font-size:0.875rem;letter-spacing:-0.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;">${p.name}</p>
+                ${seller ? `<span style="font-size:0.5rem; background:var(--surface-container-highest); color:var(--outline); padding:0.1rem 0.4rem; border-radius:4px; font-weight:800; text-transform:uppercase;">${seller.name}</span>` : ''}
+              </div>
+              <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="font-weight:700;font-size:0.8125rem;">${KwabzUtils.formatPrice(discountedPrice)}</span>
+                ${p.discount > 0 ? `<span style="font-size:0.625rem;text-decoration:line-through;color:var(--outline);">${KwabzUtils.formatPrice(p.price)}</span>` : ''}
+                <span class="chip ${!p.in_stock ? 'chip--error' : (p.availability === 'pre_order' ? 'chip--warning' : 'chip--success')}" style="font-size:0.5625rem;padding:0.2rem 0.5rem;">
+                  ${!p.in_stock ? 'Out' : (p.availability === 'pre_order' ? 'Pre-order' : 'In Stock')}
+                </span>
+              </div>
+              <p style="font-size:0.625rem;color:var(--outline);margin-top:0.25rem;">${cat ? cat.name : 'Uncategorized'} • Stock: ${p.stock}</p>
+            </div>
+            <div class="data-list__actions">
+              <button class="btn-icon" style="width:2.25rem;height:2.25rem;" title="Toggle Stock"
+                onclick="toggleStock('${p.id}')">
+                <span class="material-symbols-outlined" style="font-size:1.125rem;color:${p.in_stock ? 'var(--primary)' : 'var(--error)'};">
+                  ${p.in_stock ? 'check_circle' : 'block'}
+                </span>
+              </button>
+              <a href="admin-add-product.html?edit=${p.id}" class="btn-icon" style="width:2.25rem;height:2.25rem;" title="Edit">
+                <span class="material-symbols-outlined" style="font-size:1.125rem;">edit</span>
+              </a>
+              <button class="btn-icon" style="width:2.25rem;height:2.25rem;" title="Delete"
+                onclick="confirmDelete('${p.id}')">
+                <span class="material-symbols-outlined" style="font-size:1.125rem;color:var(--error);">delete</span>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ─── Actions (window.* so onclick attrs in rendered HTML can find them) ──
+    window.toggleStock = async function (id) {
+      const product = await KwabzStore.toggleProductStock(id);
+      if (product) {
+        KwabzUtils.toast(`${product.name} is now ${product.in_stock ? 'in stock' : 'out of stock'}`);
+      }
+    };
+
+    window.confirmDelete = function (id) {
+      deleteTargetId = id;
+      document.getElementById('deleteModal').classList.add('open');
+    };
+
+    document.getElementById('confirmDeleteBtn').addEventListener('click', async (e) => {
+      if (deleteTargetId) {
+        const btn = e.currentTarget;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Deleting...';
+
+        try {
+          await KwabzStore.deleteProduct(deleteTargetId);
+          KwabzUtils.toast('Product deleted');
+          deleteTargetId = null;
+          document.getElementById('deleteModal').classList.remove('open');
+        } catch (err) {
+          KwabzUtils.toast('Delete failed: ' + err.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      }
+    });
+
+    // ─── Data listeners (Debounced for performance) ──────────
+    const debouncedRender = KwabzUtils.debounce(() => {
+      renderFilters();
+      renderProducts();
+    }, 50);
+
+    KwabzStore.on('products_changed', debouncedRender);
+    KwabzStore.on('categories_changed', debouncedRender);
+    KwabzStore.on('sellers_changed', debouncedRender);
+    KwabzStore.on('admin_ready', debouncedRender);
+
+    // ─── Search ───────────────────────────────────────────────
+    document.getElementById('searchInput').addEventListener('input', KwabzUtils.debounce((e) => {
+      searchQuery = e.target.value.trim();
+      renderProducts();
+    }, 250));
+
+    // ─── Init is now handled by initAdminPage() wrapper above ───
+  </script>
+</body>
+
+</html>

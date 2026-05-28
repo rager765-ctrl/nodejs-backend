@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Admin Management — Kwabz Store</title>
+  <link rel="stylesheet" href="../styles.css" />
+  <style>
+    .presence-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 0.5rem;
+    }
+    .presence-dot--online { background: #10b981; box-shadow: 0 0 10px rgba(16,185,129,0.5); }
+    .presence-dot--offline { background: #94a3b8; }
+    
+    .admin-card {
+      background: var(--surface-container-low);
+      border-radius: var(--radius-xl);
+      padding: 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      border: 1px solid var(--outline-variant);
+    }
+    
+    .status-badge {
+      font-size: 0.65rem;
+      font-weight: 800;
+      padding: 0.25rem 0.6rem;
+      border-radius: 2rem;
+      text-transform: uppercase;
+    }
+    .status-badge--online { background: #dcfce7; color: #166534; }
+    .status-badge--offline { background: #f1f5f9; color: #64748b; }
+  </style>
+</head>
+
+<body>
+  <!-- ═══ Top App Bar ═══ -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <a href="admin-dashboard.html" class="icon-btn">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </a>
+      <span class="top-app-bar__title font-headline">Admin Team</span>
+      <span style="background:#0ea5e9; color:white; font-size:0.55rem; font-weight:900; padding:0.2rem 0.5rem; border-radius:4px; text-transform:uppercase; letter-spacing:0.05em; margin-top:0.2rem;">In Production</span>
+    </div>
+  </header>
+
+  <main class="page-content page-content--admin">
+    
+    <!-- Presence Section -->
+    <section style="margin-bottom:3rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+        <h2 class="section-header" style="margin-bottom:0;">Live Activity</h2>
+        <span class="text-label-sm" style="color:var(--outline);">REAL-TIME STATUS</span>
+      </div>
+      
+      <div id="presenceList">
+        <!-- Rendered by JS -->
+        <div class="empty-state" style="padding:2rem;">
+          <p class="empty-state__text">Fetching live admin status...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Register New Admin Section -->
+    <section style="margin-bottom:3rem;">
+      <h2 class="section-header">Register New Admin</h2>
+      <div class="card card--flat" style="padding:2rem; background:var(--surface-container-lowest); border:1px solid var(--outline-variant);">
+        <form id="registerAdminForm" style="display:flex; flex-direction:column; gap:1.25rem;">
+          <div class="form-group">
+            <label class="form-group__label">Full Name</label>
+            <input type="text" name="name" class="minimal-input" placeholder="e.g. John Doe" required />
+          </div>
+          <div class="form-group">
+            <label class="form-group__label">Email Address</label>
+            <input type="email" name="email" class="minimal-input" placeholder="admin2@kwabzstore.com" required />
+          </div>
+          <div class="form-group">
+            <label class="form-group__label">Temporary Password</label>
+            <input type="password" name="password" class="minimal-input" placeholder="••••••••" required />
+          </div>
+          <button type="submit" class="btn-primary" style="margin-top:0.5rem;">
+            Register & Assign Admin Role
+          </button>
+        </form>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="../store.js"></script>
+  <script src="../utils.js"></script>
+  <script type="module" src="../shell.js"></script>
+  <script>
+    let isUsersStarted = false;
+    const startAdminUsers = () => {
+      if (isUsersStarted) return;
+      if (!KwabzStore.isAuthReady() || !KwabzStore.isAdminLoggedIn() || KwabzStore.getSyncStatus() !== 'online') return;
+      isUsersStarted = true;
+      
+      KwabzStore.refreshPresence();
+      
+      KwabzStore.onAdminsPresence((admins) => {
+        renderAdmins(admins);
+      });
+    };
+
+    window.addEventListener('DOMContentLoaded', () => {
+      if (typeof KwabzUtils !== 'undefined') {
+        KwabzUtils.requireAdmin();
+      }
+      
+      // Try starting immediately
+      startAdminUsers();
+
+      // Try starting when admin auth is ready or sync finishes
+      KwabzStore.on('admin_ready', startAdminUsers);
+      KwabzStore.on('sync_status', (s) => { if (s === 'online') startAdminUsers(); });
+    });
+
+
+
+    function renderAdmins(admins) {
+      const container = document.getElementById('presenceList');
+      
+      // Sort: Online first, then by name
+      admins.sort((a, b) => {
+        const aOnline = isOnline(a.presence?.last_active);
+        const bOnline = isOnline(b.presence?.last_active);
+        if (aOnline && !bOnline) return -1;
+        if (!aOnline && bOnline) return 1;
+        return a.displayName.localeCompare(b.displayName);
+      });
+
+      container.innerHTML = admins.map(admin => {
+        const active = isOnline(admin.presence?.last_active);
+        const statusClass = active ? 'online' : 'offline';
+        const lastSeen = admin.presence?.last_active;
+        const timeStr = active ? 'Active Now' : (lastSeen ? `Last seen ${KwabzUtils.timeAgo(lastSeen)}` : 'Never logged in');
+        const isMe = admin.email === KwabzStore.getCurrentUser()?.email;
+        
+        return `
+          <div class="admin-card" style="${isMe ? 'border: 2px solid var(--primary);' : ''}">
+            <div style="display:flex; align-items:center; gap:1.25rem;">
+              <div style="width:48px; height:48px; background:${isMe ? 'var(--primary)' : 'var(--surface-container-highest)'}; color:${isMe ? 'white' : 'var(--on-surface)'}; border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:1.25rem; box-shadow:var(--shadow-soft);">
+                ${admin.displayName.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                  <p class="font-headline" style="font-weight:800; font-size:1rem;">${admin.displayName}</p>
+                  ${isMe ? '<span class="status-badge" style="background:var(--primary); color:white; font-size:0.5rem;">YOU</span>' : ''}
+                </div>
+                <p style="font-size:0.8125rem; color:var(--outline); font-weight:500; font-family:monospace; margin-top:0.1rem;">${admin.email}</p>
+              </div>
+            </div>
+            <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:0.5rem;">
+              <span class="status-badge status-badge--${statusClass}">${statusClass}</span>
+              <p style="font-size:0.625rem; color:var(--outline); font-weight:700; text-transform:uppercase;">${timeStr}</p>
+              ${!isMe ? `
+                <button onclick="revokeAdmin('${admin.id}', '${admin.displayName.replace(/'/g, "\\'")}')"
+                  style="margin-top:0.25rem; padding:0.3rem 0.75rem; border-radius:2rem; border:1px solid #fca5a5; background:transparent; color:#dc2626; font-size:0.6rem; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; cursor:pointer; transition:all 0.2s;"
+                  onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='transparent'">
+                  Revoke Access
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function isOnline(timestamp) {
+      if (!timestamp) return false;
+      const date = (timestamp.toDate && typeof timestamp.toDate === 'function') ? timestamp.toDate() : new Date(timestamp);
+      if (isNaN(date.getTime())) return false;
+      const diff = Math.abs(Date.now() - date.getTime());
+      return diff < (15 * 60 * 1000); // 15 minute window with client clock resilience
+    }
+
+    async function revokeAdmin(uid, name) {
+      if (!confirm(`⚠️ Revoke admin access for "${name}"?\n\nThis will demote them to a regular user immediately. They will be logged out of admin on their next action.`)) return;
+      try {
+        await KwabzStore.deleteAdmin(uid);
+        KwabzUtils.toast(`✅ ${name}'s admin access has been revoked.`);
+      } catch (err) {
+        KwabzUtils.toast(`❌ Error: ${err.message}`, 'error');
+      }
+    }
+    window.revokeAdmin = revokeAdmin;
+
+    // Register Form Handler
+    document.getElementById('registerAdminForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const btn = form.querySelector('button');
+      const originalText = btn.textContent;
+      
+      const email = form.email.value.trim();
+      const password = form.password.value;
+      const name = form.name.value.trim();
+
+      btn.disabled = true;
+      btn.textContent = 'Registering User...';
+
+      try {
+        await KwabzStore.registerAdmin(email, password, name);
+        KwabzUtils.toast('New admin registered successfully!');
+        form.reset();
+      } catch (err) {
+        console.error('Registration Error:', err);
+        const msg = err.message || 'An unknown error occurred during registration.';
+        KwabzUtils.toast(`Error: ${msg}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    });
+  </script>
+</body>
+</html>
+

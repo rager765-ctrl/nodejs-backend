@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
+
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Categories — Kwabz Store Admin</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+
+<body>
+
+  <!-- ═══ Top App Bar ═══ -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <a href="admin-dashboard.html" class="icon-btn">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </a>
+      <span class="top-app-bar__title font-headline">Categories</span>
+    </div>
+    <div class="top-app-bar__actions">
+      <button class="icon-btn" onclick="document.getElementById('addCategoryModal').classList.add('open')"
+        title="Add Category" style="background:var(--primary);color:var(--on-primary);border-radius:var(--radius-lg);">
+        <span class="material-symbols-outlined" style="font-size:1.25rem;">add</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══ Main Content ═══ -->
+  <main class="page-content page-content--admin">
+
+    <div style="margin-bottom:2rem;">
+      <p class="text-label-md" style="color:var(--outline);margin-bottom:0.25rem;">Catalog</p>
+      <h2 class="font-headline text-headline-lg">Manage Categories</h2>
+    </div>
+
+    <!-- Category Count -->
+    <p class="text-label-md" style="color:var(--outline);margin-bottom:1rem;"><span id="catCount">0</span> CATEGORIES
+    </p>
+
+    <!-- Category List -->
+    <div class="data-list" id="categoryList"></div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="empty-state" style="display:none;">
+      <span class="material-symbols-outlined empty-state__icon">category</span>
+      <p class="empty-state__title">No categories yet</p>
+      <p class="empty-state__text">Create your first category to organize your products.</p>
+      <button class="btn-primary" style="width:auto;padding:1rem 2rem;margin-top:1.5rem;font-size:0.8125rem;"
+        onclick="document.getElementById('addCategoryModal').classList.add('open')">
+        Add Category
+      </button>
+    </div>
+
+  </main>
+
+  <!-- ═══ Add Category Modal ═══ -->
+  <div class="modal-overlay" id="addCategoryModal" onclick="if(event.target===this) this.classList.remove('open')">
+    <div class="modal-content">
+      <div class="modal-handle"></div>
+      <h3 class="font-headline text-headline-sm" style="margin-bottom:0.5rem;">New Category</h3>
+      <p class="text-body-sm" style="color:var(--outline);margin-bottom:2rem;">Add a new product category to organize
+        your inventory.</p>
+      <form onsubmit="addCategory(event)">
+        <div class="form-group" style="margin-bottom:1.5rem;">
+          <label class="form-group__label">Category Name</label>
+          <input id="newCategoryName" class="minimal-input minimal-input--headline" type="text"
+            placeholder="e.g. Outerwear" required autofocus />
+        </div>
+        <div class="form-group" style="margin-bottom:1.5rem;">
+          <label class="form-group__label">Profile Image (Circular)</label>
+          <div style="display:flex; gap:0.5rem;">
+            <input type="text" id="newCategoryImage" class="minimal-input" placeholder="https://..." />
+            <input type="file" id="fileNewCat" accept="image/*" style="display:none;"
+              onchange="handleImageUpload(event, 'newCategoryImage')" />
+            <button type="button" class="btn-secondary"
+              onclick="document.getElementById('fileNewCat').click()">Upload</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:0.75rem;">
+          <button type="button" class="btn-secondary" style="flex:1;"
+            onclick="document.getElementById('addCategoryModal').classList.remove('open')">Cancel</button>
+          <button type="submit" class="btn-primary" style="flex:1;">Create Category</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══ Edit Category Modal ═══ -->
+  <div class="modal-overlay" id="editCategoryModal" onclick="if(event.target===this) this.classList.remove('open')">
+    <div class="modal-content">
+      <div class="modal-handle"></div>
+      <h3 class="font-headline text-headline-sm" style="margin-bottom:0.5rem;">Edit Category</h3>
+      <p class="text-body-sm" style="color:var(--outline);margin-bottom:2rem;">Update the category name or profile
+        image.</p>
+      <form onsubmit="saveCategoryEdit(event)">
+        <div class="form-group" style="margin-bottom:1.5rem;">
+          <label class="form-group__label">Category Name</label>
+          <input id="editCategoryName" class="minimal-input" type="text" placeholder="e.g. Outerwear" required />
+        </div>
+        <div class="form-group" style="margin-bottom:1.5rem;">
+          <label class="form-group__label">Profile Image (Circular)</label>
+          <div style="display:flex; gap:0.5rem;">
+            <input type="text" id="editCategoryImage" class="minimal-input" placeholder="https://..." />
+            <input type="file" id="fileEditCat" accept="image/*" style="display:none;"
+              onchange="handleImageUpload(event, 'editCategoryImage')" />
+            <button type="button" class="btn-secondary"
+              onclick="document.getElementById('fileEditCat').click()">Upload</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:0.75rem;">
+          <button type="button" class="btn-secondary" style="flex:1;"
+            onclick="document.getElementById('editCategoryModal').classList.remove('open')">Cancel</button>
+          <button type="submit" class="btn-primary" style="flex:1;">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══ Delete Confirmation Modal ═══ -->
+  <div class="modal-overlay" id="deleteModal" onclick="if(event.target===this) this.classList.remove('open')">
+    <div class="modal-content" style="max-width:24rem;border-radius:var(--radius-xl);padding:2rem;">
+      <div class="modal-handle"></div>
+      <h3 class="font-headline text-headline-sm" style="margin-bottom:0.5rem;">Delete Category?</h3>
+      <p class="text-body-sm" style="color:var(--outline);margin-bottom:0.5rem;">This will remove the category. Products
+        in this category will become uncategorized.</p>
+      <p id="deleteCatName" class="font-headline" style="font-weight:700;margin-bottom:2rem;"></p>
+      <div style="display:flex;gap:0.75rem;">
+        <button class="btn-secondary" style="flex:1;"
+          onclick="document.getElementById('deleteModal').classList.remove('open')">Cancel</button>
+        <button class="btn-danger" style="flex:1;" id="confirmDeleteBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Admin Bottom Nav ═══ -->
+  <nav class="bottom-nav-admin">
+    <a href="admin-dashboard.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">dashboard</span>
+      <span>Stats</span>
+    </a>
+    <a href="admin-products.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">inventory_2</span>
+      <span>Products</span>
+    </a>
+    <a href="admin-diagnostics.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">query_stats</span>
+      <span>Insights</span>
+    </a>
+    <a href="admin-orders.html" class="bottom-nav-admin__item">
+      <span class="material-symbols-outlined" style="font-size:1.25rem;">receipt_long</span>
+      <span>Orders</span>
+    </a>
+  </nav>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="../store.js"></script>
+  <script src="../utils.js"></script>
+  <script type="module" src="../shell.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      if (typeof KwabzUtils !== 'undefined') {
+        KwabzUtils.requireAdmin();
+      }
+      renderCategories();
+
+      // ─── Data listeners ───────────────────────────────────────
+      KwabzStore.on('categories_changed', () => renderCategories());
+      KwabzStore.on('products_changed', () => renderCategories());
+    });
+
+    let deleteTargetId = null;
+    let editTargetId = null;
+
+    function renderCategories() {
+      const categories = KwabzStore.getCategories();
+      const container = document.getElementById('categoryList');
+      const empty = document.getElementById('emptyState');
+      document.getElementById('catCount').textContent = categories.length;
+
+      if (categories.length === 0) {
+        container.innerHTML = '';
+        empty.style.display = 'flex';
+        return;
+      }
+
+      empty.style.display = 'none';
+
+      const allProducts = KwabzStore.getAllProducts();
+
+      container.innerHTML = categories.map(cat => {
+        const productCount = allProducts.filter(p => p.category_id === cat.id).length;
+        const img = cat.image_url ? `<img src="${cat.image_url}" style="width:100%; height:100%; object-fit:contain; padding:0.25rem; box-sizing:border-box;" />` : `<span class="material-symbols-outlined" style="color:var(--primary);font-size:1.25rem;">category</span>`;
+
+        return `
+          <div class="data-list__item">
+            <div style="width:3rem;height:3rem;border-radius:50%;background:var(--surface-container-high);display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;border:1px solid var(--outline-variant);">
+              ${img}
+            </div>
+            <div class="data-list__info">
+              <p class="font-headline" style="font-weight:700;font-size:0.9375rem;">${cat.name}</p>
+              <p style="font-size:0.6875rem;color:var(--outline);margin-top:0.125rem;">${productCount} products • Click to edit image</p>
+            </div>
+            <div class="data-list__actions">
+              <button class="btn-icon" style="width:2.25rem;height:2.25rem;" title="Edit Image"
+                onclick="openEditModal('${cat.id}', '${cat.name.replace(/'/g, "\\'")}', '${cat.image_url || ''}')">
+                <span class="material-symbols-outlined" style="font-size:1.125rem;">edit</span>
+              </button>
+              <button class="btn-icon" style="width:2.25rem;height:2.25rem;" title="Delete"
+                onclick="confirmDelete('${cat.id}', '${cat.name.replace(/'/g, "\\'")}')">
+                <span class="material-symbols-outlined" style="font-size:1.125rem;color:var(--error);">delete</span>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // --- Image Editing ---
+    function openEditModal(id, name, currentImg) {
+      editTargetId = id;
+      document.getElementById('editCategoryName').value = name;
+      document.getElementById('editCategoryImage').value = currentImg;
+      document.getElementById('editCategoryModal').classList.add('open');
+    }
+
+    async function saveCategoryEdit(e) {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"]');
+      if (btn.disabled) return;
+      const originalText = btn.textContent;
+      
+      const updates = {
+        name: document.getElementById('editCategoryName').value.trim(),
+        image_url: document.getElementById('editCategoryImage').value.trim()
+      };
+
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+
+      try {
+        await KwabzStore.updateCategory(editTargetId, updates);
+        KwabzUtils.toast('Category updated');
+        document.getElementById('editCategoryModal').classList.remove('open');
+      } catch (err) {
+        KwabzUtils.toast('Failed to update category: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+
+    function handleImageUpload(e, inputId) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        document.getElementById(inputId).value = event.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function addCategory(e) {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type="submit"]');
+      if (btn.disabled) return;
+      const originalText = btn.textContent;
+      const nameInput = document.getElementById('newCategoryName');
+      const name = nameInput.value.trim();
+      const imgInput = document.getElementById('newCategoryImage');
+      const image_url = imgInput ? imgInput.value.trim() : '';
+
+      if (!name) {
+        KwabzUtils.toast('Please enter a category name', 'error');
+        return;
+      }
+
+      // Check duplicate
+      const existing = KwabzStore.getCategories().find(c => c.name.toLowerCase() === name.toLowerCase());
+      if (existing) {
+        KwabzUtils.toast('Category already exists', 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
+
+      try {
+        await KwabzStore.addCategory({ name, image_url });
+        KwabzUtils.toast(`Category "${name}" created`);
+        nameInput.value = '';
+        if (imgInput) imgInput.value = '';
+        document.getElementById('addCategoryModal').classList.remove('open');
+      } catch (err) {
+        KwabzUtils.toast('Failed to create category: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+
+    function confirmDelete(id, name) {
+      deleteTargetId = id;
+      document.getElementById('deleteCatName').textContent = `"${name}"`;
+      document.getElementById('deleteModal').classList.add('open');
+    }
+
+    document.getElementById('confirmDeleteBtn').addEventListener('click', async (e) => {
+      if (deleteTargetId) {
+        const btn = e.currentTarget;
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Deleting...';
+
+        try {
+          await KwabzStore.deleteCategory(deleteTargetId);
+          KwabzUtils.toast('Category deleted');
+          deleteTargetId = null;
+          document.getElementById('deleteModal').classList.remove('open');
+        } catch (err) {
+          KwabzUtils.toast('Delete failed: ' + err.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      }
+    });
+
+    // ─── Data listeners ───────────────────────────────────────
+    KwabzStore.on('categories_changed', () => renderCategories());
+    KwabzStore.on('products_changed', () => renderCategories());
+
+    // Init is handled by DOMContentLoaded above
+  </script>
+</body>
+
+</html>
