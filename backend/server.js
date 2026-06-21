@@ -6,7 +6,6 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import fs from 'fs';
 import path from 'path';
-import { createClient } from 'redis';
 
 // Load Config
 dotenv.config();
@@ -35,7 +34,7 @@ try {
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     console.log('📦 Loading Firebase Service Account from Environment Variable...');
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-  } 
+  }
   // 2. Fall back to local file if available
   else if (fs.existsSync(SERVICE_ACCOUNT_PATH)) {
     console.log('📂 Loading Firebase Service Account from local file...');
@@ -76,33 +75,30 @@ const cache = {
   reviews: {} // productId -> reviews array
 };
 
-// ─── Initialize Redis client (Optional cache backend) ─────────
-const REDIS_URL = process.env.REDIS_URL;
+// ─── Initialize Upstash Redis client ──────────────────────────
+import { Redis } from '@upstash/redis';
+
 let redisClient = null;
 let isRedisOnline = false;
 
-if (REDIS_URL) {
-  try {
-    console.log('📡 Attempting to connect to Redis cache backend...');
-    redisClient = createClient({ url: REDIS_URL });
-    
-    redisClient.on('error', (err) => {
-      console.warn('⚠️  Redis Client Error:', err.message);
-      isRedisOnline = false;
-    });
-    
-    redisClient.on('connect', () => {
-      console.log('✅ Connected to Redis cache backend successfully.');
-      isRedisOnline = true;
-    });
-
-    await redisClient.connect();
-  } catch (err) {
-    console.warn('⚠️  Redis connection failed. Falling back to local memory cache.', err.message);
-    isRedisOnline = false;
-  }
-} else {
-  console.log('ℹ️  No REDIS_URL configured. Using local in-memory store.');
+try {
+  console.log('📡 Attempting to connect to Upstash Redis cache backend...');
+  // Using the provided credentials or fallback to env
+  redisClient = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  });
+  
+  // Test connection
+  redisClient.get('ping').then(() => {
+    console.log('✅ Connected to Upstash Redis cache backend successfully.');
+    isRedisOnline = true;
+  }).catch(e => {
+    console.warn('⚠️ Upstash connection ping failed. Using local in-memory store.', e.message);
+  });
+} catch (err) {
+  console.warn('⚠️  Redis connection failed. Falling back to local memory cache.', err.message);
+  isRedisOnline = false;
 }
 
 // ─── Redis & local Cache Helpers ──────────────────────────────
@@ -132,7 +128,7 @@ async function setCacheValue(key, value, ttlSeconds = null) {
     try {
       const dataStr = JSON.stringify(value);
       if (ttlSeconds) {
-        await redisClient.set(key, dataStr, { EX: ttlSeconds });
+        await redisClient.set(key, dataStr, { ex: ttlSeconds });
       } else {
         await redisClient.set(key, dataStr);
       }
@@ -147,7 +143,7 @@ async function getCacheValue(key, fallbackLocalValue) {
     try {
       const data = await redisClient.get(key);
       if (data) {
-        return JSON.parse(data);
+        return typeof data === 'string' ? JSON.parse(data) : data;
       }
     } catch (err) {
       console.warn(`[Redis Cache] Read failed for key: ${key}`, err.message);
@@ -368,6 +364,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     firebase: isFirebaseOnline ? 'connected' : 'fallback_mock',
+    redis: isRedisOnline ? 'connected' : 'offline',
     cacheSizes: {
       products: cache.products.length,
       categories: cache.categories.length,
@@ -423,6 +420,15 @@ app.post('/api/visitors/heartbeat', (req, res) => {
 // 7. Get Active Visitor Count
 app.get('/api/visitor-count', (req, res) => {
   res.json({ count: activeVisitors.size });
+});
+
+// 7.5. Get Detailed Active Visitors
+app.get('/api/visitors/detailed', (req, res) => {
+  const visitors = Array.from(activeVisitors.entries()).map(([vid, data]) => ({
+    visitorId: vid,
+    ...data
+  }));
+  res.json({ count: visitors.length, visitors });
 });
 
 // 8. Order Placement Proxy
@@ -488,7 +494,7 @@ app.get('/api/reviews/:productId', async (req, res) => {
       .get();
     const reviews = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     reviews.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
-    
+
     // Store in cache (with 5-minute TTL)
     await setCacheValue(key, reviews, 5 * 60);
     res.json(reviews);
@@ -507,7 +513,7 @@ app.post('/api/reviews', async (req, res) => {
     const reviewData = req.body;
     reviewData.created_at = reviewData.created_at || new Date().toISOString();
     const docRef = await db.collection('reviews').add(reviewData);
-    
+
     // Invalidate product reviews cache in local RAM and Redis
     delete cache.reviews[reviewData.product_id];
     if (isRedisOnline && redisClient) {
@@ -517,7 +523,7 @@ app.post('/api/reviews', async (req, res) => {
         console.warn('[Redis Cache] Failed to invalidate reviews key:', err.message);
       }
     }
-    
+
     res.status(201).json({ id: docRef.id, ...reviewData });
   } catch (err) {
     console.error('Failed to add review:', err);
@@ -528,7 +534,7 @@ app.post('/api/reviews', async (req, res) => {
 // ─── WebSocket Event Handling ─────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected to Socket.IO: ${socket.id}`);
-  
+
   // Send active visitor count immediately to new dashboards
   socket.emit('visitor_count_updated', activeVisitors.size);
 
@@ -571,6 +577,7 @@ httpServer.listen(PORT, () => {
   console.log(`🚀 Kwabz Store Optimization API Server Online!`);
   console.log(`📡 URL: http://localhost:${PORT}`);
   console.log(`🛡️  Live-Sync Engine listening to Firestore...`);
+  console.log(`👀 Live Audience endpoint mounted at /api/visitors/detailed`);
   console.log(`===================================================`);
   setupBackgroundSync();
 });
