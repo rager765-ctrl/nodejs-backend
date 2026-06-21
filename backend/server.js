@@ -73,6 +73,9 @@ const cache = {
   sellers: [],
   orders: [],
   settings: {},
+  blogPosts: [],
+  promoCodes: [],
+  broadcasts: [],
   reviews: {} // productId -> reviews array
 };
 
@@ -109,6 +112,9 @@ const cacheKeys = {
   sellers: 'kwabz:sellers',
   orders: 'kwabz:orders',
   settings: 'kwabz:settings',
+  blogPosts: 'kwabz:blogPosts',
+  promoCodes: 'kwabz:promoCodes',
+  broadcasts: 'kwabz:broadcasts',
   reviews: (productId) => `kwabz:reviews:${productId}`
 };
 
@@ -119,6 +125,9 @@ async function setCacheValue(key, value, ttlSeconds = null) {
   else if (key === cacheKeys.sellers) cache.sellers = value;
   else if (key === cacheKeys.orders) cache.orders = value;
   else if (key === cacheKeys.settings) cache.settings = value;
+  else if (key === cacheKeys.blogPosts) cache.blogPosts = value;
+  else if (key === cacheKeys.promoCodes) cache.promoCodes = value;
+  else if (key === cacheKeys.broadcasts) cache.broadcasts = value;
   else if (key.startsWith('kwabz:reviews:')) {
     const prodId = key.replace('kwabz:reviews:', '');
     cache.reviews[prodId] = { data: value, ts: Date.now() };
@@ -174,7 +183,10 @@ let unsubscribers = {
   products: null,
   categories: null,
   sellers: null,
-  settings: null
+  settings: null,
+  blogPosts: null,
+  promoCodes: null,
+  broadcasts: null
 };
 
 function setupBackgroundSync() {
@@ -232,6 +244,42 @@ function setupBackgroundSync() {
       io.emit('orders_changed', cache.orders);
     }, err => {
       console.error('[Firestore Sync] Orders snapshot failed:', err.message);
+    });
+
+  // 5. Live Blog Posts Listener
+  unsubscribers.blogPosts = db.collection('blog_posts')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] blog_posts collection updated. Syncing ${snapshot.size} items.`);
+      const blogPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      blogPosts.sort((a, b) => getSafeTime(b.created_at || b.date) - getSafeTime(a.created_at || a.date));
+      await setCacheValue(cacheKeys.blogPosts, blogPosts);
+      io.emit('blog_posts_changed', cache.blogPosts);
+    }, err => {
+      console.error('[Firestore Sync] Blog posts snapshot failed:', err.message);
+    });
+
+  // 6. Live Promo Codes Listener
+  unsubscribers.promoCodes = db.collection('promo_codes')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] promo_codes collection updated. Syncing ${snapshot.size} items.`);
+      const promoCodes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      promoCodes.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
+      await setCacheValue(cacheKeys.promoCodes, promoCodes);
+      io.emit('promo_codes_changed', cache.promoCodes);
+    }, err => {
+      console.error('[Firestore Sync] Promo codes snapshot failed:', err.message);
+    });
+
+  // 7. Live Broadcasts Listener
+  unsubscribers.broadcasts = db.collection('broadcasts')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] broadcasts collection updated. Syncing ${snapshot.size} items.`);
+      const broadcasts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      broadcasts.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
+      await setCacheValue(cacheKeys.broadcasts, broadcasts);
+      io.emit('broadcasts_changed', cache.broadcasts);
+    }, err => {
+      console.error('[Firestore Sync] Broadcasts snapshot failed:', err.message);
     });
 
   // 4. Live Settings Document Listener
@@ -468,6 +516,20 @@ app.get('/api/orders', async (req, res) => {
 });
 
 // 10. Fetch Product Reviews (With in-memory/Redis caching)
+app.get('/api/blog-posts', (req, res) => {
+  res.json(cache.blogPosts.length > 0 ? cache.blogPosts : []);
+});
+
+app.get('/api/promo-codes', (req, res) => {
+  const list = cache.promoCodes.length > 0 ? cache.promoCodes : [];
+  const safeList = list.filter(p => p.active !== false && (!p.cash_limit || (p.total_discounted || 0) < p.cash_limit));
+  res.json(safeList);
+});
+
+app.get('/api/broadcasts', (req, res) => {
+  res.json(cache.broadcasts.length > 0 ? cache.broadcasts : []);
+});
+
 app.get('/api/reviews/:productId', async (req, res) => {
   const { productId } = req.params;
   const key = cacheKeys.reviews(productId);
@@ -559,7 +621,7 @@ io.on('connection', (socket) => {
 // ─── Render 24/7 Keep-Alive Self-Ping ─────────────────────────
 // Free Render instances spin down after 15 minutes of inactivity.
 // We ping our own public URL every 10 minutes to keep the instance active and warm!
-const SELF_URL = process.env.SELF_URL || `https://nodejs-backend-1-ucbq.onrender.com`;
+const SELF_URL = process.env.SELF_URL || `https://nodejs-backend-1-wle5.onrender.com`;
 if (SELF_URL) {
   console.log(`📡 Keep-Alive configured. Warming self-pings every 8 min for: ${SELF_URL}`);
   setInterval(async () => {
