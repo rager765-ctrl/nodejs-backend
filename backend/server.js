@@ -3,7 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { createServer } from 'http';
+import http, { createServer } from 'http';
+import https from 'https';
 import { Server } from 'socket.io';
 import fs from 'fs';
 import path from 'path';
@@ -620,19 +621,36 @@ io.on('connection', (socket) => {
 
 // ─── Render 24/7 Keep-Alive Self-Ping ─────────────────────────
 // Free Render instances spin down after 15 minutes of inactivity.
-// We ping our own public URL every 10 minutes to keep the instance active and warm!
-const SELF_URL = process.env.SELF_URL || `https://nodejs-backend-1-wle5.onrender.com`;
-if (SELF_URL) {
-  console.log(`📡 Keep-Alive configured. Warming self-pings every 8 min for: ${SELF_URL}`);
-  setInterval(async () => {
+// We ping our own public URL every 8 minutes to keep the instance active and warm!
+const candidateUrls = [
+  process.env.RENDER_EXTERNAL_URL,
+  process.env.SELF_URL,
+  'https://nodejs-backend-1-ucbq.onrender.com',
+  'https://kwabz-store-backend.onrender.com'
+].filter(Boolean);
+
+// Deduplicate candidate URLs and map to health endpoint
+const pingUrls = [...new Set(candidateUrls)].map(url => `${url.replace(/\/$/, '')}/api/health`);
+
+console.log(`📡 Keep-Alive configured. Warming self-pings every 8 min for:`, pingUrls);
+
+setInterval(() => {
+  pingUrls.forEach(url => {
     try {
-      const res = await fetch(`${SELF_URL}/api/health`);
-      console.log(`[Keep-Alive] Sent warming ping to self. Status: ${res.status}`);
+      const urlObj = new URL(url);
+      const client = urlObj.protocol === 'https:' ? https : http;
+      const req = client.get(urlObj.href, (res) => {
+        res.resume(); // Consume response data to free up memory and socket resources
+        console.log(`[Keep-Alive] Sent warming ping to ${urlObj.hostname}. Status: ${res.statusCode}`);
+      });
+      req.on('error', (err) => {
+        console.warn(`[Keep-Alive] Self-ping failed for ${urlObj.hostname}:`, err.message);
+      });
     } catch (err) {
-      console.warn(`[Keep-Alive] Self-ping failed:`, err.message);
+      console.warn(`[Keep-Alive] Invalid ping URL: ${url}`, err.message);
     }
-  }, 8 * 60 * 1000); // Every 8 minutes — well under Render's 15-min sleep threshold
-}
+  });
+}, 8 * 60 * 1000); // Every 8 minutes — well under Render's 15-min sleep threshold
 
 // Start Server
 httpServer.listen(PORT, () => {
