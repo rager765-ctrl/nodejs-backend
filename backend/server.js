@@ -723,15 +723,29 @@ httpServer.listen(PORT, () => {
   setupBackgroundSync();
 });
 
-// Graceful Shutdown
+// ─── Graceful Shutdown (Render rolling deploy / manual stop) ─────────────
 process.on('SIGTERM', () => {
-  console.log('Gracefully shutting down...');
-  if (unsubscribers.products) unsubscribers.products();
-  if (unsubscribers.categories) unsubscribers.categories();
-  if (unsubscribers.sellers) unsubscribers.sellers();
-  if (unsubscribers.settings) unsubscribers.settings();
+  console.log('[Render] SIGTERM received — rolling deploy or stop. Cleaning up...');
+  // Tear down ALL Firestore listeners to prevent dangling connections
+  Object.values(unsubscribers).forEach(unsub => { if (typeof unsub === 'function') unsub(); });
   httpServer.close(() => {
-    console.log('Server process terminated.');
+    console.log('[Render] HTTP server closed. Process exiting cleanly.');
     process.exit(0);
   });
+  // Force-exit after 10s if httpServer.close() hangs
+  setTimeout(() => {
+    console.warn('[Render] Force-exiting after 10s timeout.');
+    process.exit(1);
+  }, 10000).unref();
+});
+
+// ─── Process Crash Guards ─────────────────────────────────────────────────
+// Prevent a single unhandled async error from killing the entire server
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception — server continuing:', err.message);
+  console.error(err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled Promise Rejection — server continuing:', reason);
 });
