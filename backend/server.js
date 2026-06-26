@@ -595,6 +595,42 @@ app.post('/api/reviews', async (req, res) => {
   }
 });
 
+// 12. Fetch Reviews by User (for account.html My Reviews sheet)
+app.get('/api/reviews/user/:uid', async (req, res) => {
+  const { uid } = req.params;
+  if (!uid) return res.status(400).json({ error: 'uid is required' });
+
+  const cacheKey = `kwabz:reviews:user:${uid}`;
+
+  if (isRedisOnline && redisClient) {
+    try {
+      const data = await redisClient.get(cacheKey);
+      if (data) return res.json(typeof data === 'string' ? JSON.parse(data) : data);
+    } catch (err) {
+      console.warn('[Redis] User reviews read failed:', err.message);
+    }
+  }
+
+  if (!isFirebaseOnline || !db) return res.json([]);
+
+  try {
+    const snap = await db.collection('reviews').where('user_id', '==', uid).get();
+    const reviews = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    reviews.sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return tb - ta;
+    });
+    if (isRedisOnline && redisClient) {
+      try { await redisClient.set(cacheKey, JSON.stringify(reviews), { ex: 120 }); } catch (_) {}
+    }
+    res.json(reviews);
+  } catch (err) {
+    console.error('Failed to fetch user reviews:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── WebSocket Event Handling ─────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected to Socket.IO: ${socket.id}`);
