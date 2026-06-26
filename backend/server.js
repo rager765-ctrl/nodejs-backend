@@ -424,6 +424,12 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// 1.1 Lightweight Ping/Wake Endpoint (for external cron services like cron-job.org)
+// Point your external pinger HERE: /api/ping — minimal response, no Firebase reads
+app.get('/api/ping', (req, res) => {
+  res.json({ status: 'awake', ts: Date.now() });
+});
+
 // 2. Fetch Products (Serves instantly from memory cache!)
 app.get('/api/products', (req, res) => {
   res.json(cache.products.length > 0 ? cache.products : mockData.products);
@@ -656,8 +662,34 @@ io.on('connection', (socket) => {
 });
 
 // ─── Render 24/7 Keep-Alive Self-Ping ─────────────────────────
-// Free Render instances spin down after 15 minutes of inactivity.
-// We ping our own public URL every 8 minutes to keep the instance active and warm!
+// NOTE: Render free tier now IGNORES self-pings from the same instance.
+// The self-ping below is a fallback. For reliable uptime, point an EXTERNAL
+// free cron service (e.g. https://cron-job.org) to:
+//   GET  https://your-app.onrender.com/api/ping   (every 4 minutes)
+//
+// Set EXTERNAL_PING_URL in Render env vars to enable cross-service waking.
+
+function safePing(rawUrl, label) {
+  try {
+    const urlObj = new URL(rawUrl);
+    const client = urlObj.protocol === 'https:' ? https : http;
+    const req = client.get(urlObj.href, (res) => {
+      res.resume(); // Drain response body to free socket
+      console.log(`[Keep-Alive] ${label} ping → ${urlObj.hostname} : ${res.statusCode}`);
+    });
+    // Hard timeout: abort if no response within 10 seconds
+    req.setTimeout(10000, () => {
+      req.destroy();
+      console.warn(`[Keep-Alive] ${label} ping timed out for ${rawUrl}`);
+    });
+    req.on('error', (err) => {
+      console.warn(`[Keep-Alive] ${label} ping error (${urlObj.hostname}):`, err.message);
+    });
+  } catch (err) {
+    console.warn(`[Keep-Alive] Invalid URL skipped (${label}):`, err.message);
+  }
+}
+
 const candidateUrls = [
   process.env.RENDER_EXTERNAL_URL,
   process.env.SELF_URL,
@@ -665,28 +697,20 @@ const candidateUrls = [
   'https://kwabz-store-backend.onrender.com'
 ].filter(Boolean);
 
-// Deduplicate candidate URLs and map to health endpoint
-const pingUrls = [...new Set(candidateUrls)].map(url => `${url.replace(/\/$/, '')}/api/health`);
+// Map to the lightweight /api/ping endpoint (not /api/health which does more work)
+const pingUrls = [...new Set(candidateUrls)].map(url => `${url.replace(/\/$/, '')}/api/ping`);
 
-console.log(`📡 Keep-Alive configured. Warming self-pings every 8 min for:`, pingUrls);
+console.log(`📡 Keep-Alive: Self-pinging every 4 min for:`, pingUrls);
 
+// Self-ping every 4 minutes (belt-and-suspenders; external cron is the true fix)
 setInterval(() => {
-  pingUrls.forEach(url => {
-    try {
-      const urlObj = new URL(url);
-      const client = urlObj.protocol === 'https:' ? https : http;
-      const req = client.get(urlObj.href, (res) => {
-        res.resume(); // Consume response data to free up memory and socket resources
-        console.log(`[Keep-Alive] Sent warming ping to ${urlObj.hostname}. Status: ${res.statusCode}`);
-      });
-      req.on('error', (err) => {
-        console.warn(`[Keep-Alive] Self-ping failed for ${urlObj.hostname}:`, err.message);
-      });
-    } catch (err) {
-      console.warn(`[Keep-Alive] Invalid ping URL: ${url}`, err.message);
-    }
-  });
-}, 8 * 60 * 1000); // Every 8 minutes — well under Render's 15-min sleep threshold
+  pingUrls.forEach(url => safePing(url, 'Self'));
+
+  // Also wake any external partner URL if configured (e.g., the WhatsApp bot server)
+  if (process.env.EXTERNAL_PING_URL) {
+    safePing(process.env.EXTERNAL_PING_URL, 'External');
+  }
+}, 4 * 60 * 1000); // Every 4 minutes
 
 // Start Server
 httpServer.listen(PORT, () => {
