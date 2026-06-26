@@ -93,7 +93,7 @@ try {
     url: process.env.UPSTASH_REDIS_REST_URL,
     token: process.env.UPSTASH_REDIS_REST_TOKEN,
   });
-  
+
   // Test connection
   redisClient.get('ping').then(() => {
     console.log('✅ Connected to Upstash Redis cache backend successfully.');
