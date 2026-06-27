@@ -522,6 +522,58 @@ app.get('/api/orders', async (req, res) => {
   }
 });
 
+// 10. Track Order by Ref ID
+app.get('/api/orders/track/:refId', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const cleanId = req.params.refId.trim();
+    const cleanIdUpper = cleanId.toUpperCase();
+    
+    // 1. By ID
+    let snap = await db.collection('orders').doc(cleanId).get();
+    if (snap.exists) return res.json(snap.data());
+
+    // 2. By order_label
+    let querySnap = await db.collection('orders').where('order_label', '==', cleanIdUpper).limit(1).get();
+    if (!querySnap.empty) return res.json(querySnap.docs[0].data());
+
+    // 3. By order_number
+    let hashNum = cleanIdUpper.startsWith('#') ? cleanIdUpper : '#' + cleanIdUpper;
+    querySnap = await db.collection('orders').where('order_number', '==', hashNum).limit(1).get();
+    if (!querySnap.empty) return res.json(querySnap.docs[0].data());
+
+    // 4. By ref_id (numeric)
+    const numRef = parseInt(cleanId, 10);
+    if (!isNaN(numRef)) {
+      querySnap = await db.collection('orders').where('ref_id', '==', numRef).limit(1).get();
+      if (!querySnap.empty) return res.json(querySnap.docs[0].data());
+    }
+    
+    res.status(404).json({ error: 'Order not found' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 11. Request Seller Activation PIN
+app.post('/api/seller-pins', express.json(), async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'DB unavailable' });
+  try {
+    const from = req.body.from || 'unknown';
+    const pinStr = Math.floor(100000 + Math.random() * 900000).toString();
+    const pinId = 'KBZ-' + pinStr;
+    await db.collection('seller_pins').doc(pinId).set({
+      pin: pinId,
+      status: 'pending',
+      requested_by: from,
+      created_at: admin.firestore.FieldValue.serverTimestamp()
+    });
+    res.json({ success: true, pin: pinId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 10. Fetch Product Reviews (With in-memory/Redis caching)
 app.get('/api/blog-posts', (req, res) => {
   res.json(cache.blogPosts.length > 0 ? cache.blogPosts : []);
