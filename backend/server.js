@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
 import http, { createServer } from 'http';
 import https from 'https';
 import { Server } from 'socket.io';
@@ -187,7 +188,8 @@ let unsubscribers = {
   settings: null,
   blogPosts: null,
   promoCodes: null,
-  broadcasts: null
+  broadcasts: null,
+  productNotifications: null
 };
 
 function setupBackgroundSync() {
@@ -294,6 +296,114 @@ function setupBackgroundSync() {
     }, err => {
       console.error('[Firestore Sync] Settings snapshot failed:', err.message);
     });
+
+  // 8. Live Product Notifications Listener (triggers FCM push notifications to all registered tokens)
+  unsubscribers.productNotifications = db.collection('product_notifications')
+    .onSnapshot(async snapshot => {
+      snapshot.docChanges().forEach(async change => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          const docCreatedAt = getSafeTime(data.created_at);
+          // If the notification document is fresh (created in the last 2 minutes)
+          if (Date.now() - docCreatedAt < 120000) {
+            console.log(`[Push Notification] New product notification detected: ${data.name}. Sending to FCM subscribers...`);
+            await sendPushNotificationToAll({
+              title: '🛍️ New Arrival at Kwabz Store!',
+              body: `${data.name} | GH₵ ${Number(data.price).toFixed(2)}`,
+              image: data.image_url || '',
+              productId: data.product_id || ''
+            });
+          }
+        }
+      });
+    }, err => {
+      console.error('[Firestore Sync] Product notifications snapshot failed:', err.message);
+    });
+}
+
+// ─── FCM Broadcast Helper ────────────────────────────────────
+async function sendPushNotificationToAll({ title, body, image, productId }) {
+  if (!isFirebaseOnline || !db) {
+    console.warn('[Push Notification] Cannot send, Firebase is offline.');
+    return;
+  }
+
+  try {
+    const snapshot = await db.collection('fcm_tokens').get();
+    if (snapshot.empty) {
+      console.log('[Push Notification] No registered FCM tokens found.');
+      return;
+    }
+
+    const tokens = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (data.token) {
+        tokens.push(data.token);
+      }
+    });
+
+    console.log(`[Push Notification] Broadcasting to ${tokens.length} subscribers...`);
+
+    const chunkSize = 500;
+    for (let i = 0; i < tokens.length; i += chunkSize) {
+      const tokenBatch = tokens.slice(i, i + chunkSize);
+      
+      const message = {
+        tokens: tokenBatch,
+        notification: {
+          title: title,
+          body: body,
+        },
+        data: {
+          product_id: productId || ''
+        }
+      };
+
+      if (image) {
+        message.notification.image = image;
+      }
+
+      message.webpush = {
+        headers: {
+          TTL: '86400'
+        },
+        notification: {
+          icon: '/icon-192x192.png',
+          badge: '/icon-72x72.png',
+          image: image || undefined,
+          actions: [
+            { action: 'view', title: '👀 View Product' }
+          ]
+        },
+        fcmOptions: {
+          link: productId ? `/product-detail.html?id=${productId}` : '/shop.html'
+        }
+      };
+
+      const response = await getMessaging().sendEachForMulticast(message);
+      console.log(`[Push Notification] Batch sent. Success: ${response.successCount}, Failure: ${response.failureCount}`);
+
+      if (response.failureCount > 0) {
+        const batchCleanup = db.batch();
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            const error = resp.error;
+            if (error.code === 'messaging/invalid-registration-token' ||
+                error.code === 'messaging/registration-token-not-registered') {
+              const invalidToken = tokenBatch[idx];
+              const docRef = db.collection('fcm_tokens').doc(invalidToken);
+              batchCleanup.delete(docRef);
+            }
+          }
+        });
+        await batchCleanup.commit();
+        console.log('[Push Notification] Cleaned up unregistered tokens from database.');
+      }
+    }
+  } catch (err) {
+    console.error('[Push Notification] Failed to broadcast FCM notifications:', err);
+  }
 }
 
 // ─── Memory Visitor Heartbeat Sweep Task ─────────────────────
