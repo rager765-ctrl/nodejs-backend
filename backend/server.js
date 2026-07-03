@@ -316,7 +316,17 @@ function setupBackgroundSync() {
             body: label.msg
           },
           data: { order_id: orderId, url: receiptUrl },
+          android: { priority: 'high' },
+          apns: {
+            headers: {
+              'apns-priority': '10',
+              'apns-push-type': 'alert'
+            }
+          },
           webpush: {
+            headers: {
+              Urgency: 'high'
+            },
             fcmOptions: { link: receiptUrl },
             notification: {
               icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
@@ -415,7 +425,17 @@ function setupBackgroundSync() {
             body: bd.message || bd.body || 'Tap to view the latest announcement.'
           },
           data: { url: 'https://kwabz-store-v2.vercel.app/shop.html' },
+          android: { priority: 'high' },
+          apns: {
+            headers: {
+              'apns-priority': '10',
+              'apns-push-type': 'alert'
+            }
+          },
           webpush: {
+            headers: {
+              Urgency: 'high'
+            },
             fcmOptions: { link: 'https://kwabz-store-v2.vercel.app/shop.html' },
             notification: {
               icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
@@ -477,7 +497,17 @@ function setupBackgroundSync() {
             body: chatText.length > 80 ? chatText.slice(0, 77) + '...' : chatText
           },
           data: { url: 'https://kwabz-store-v2.vercel.app/account.html' },
+          android: { priority: 'high' },
+          apns: {
+            headers: {
+              'apns-priority': '10',
+              'apns-push-type': 'alert'
+            }
+          },
           webpush: {
+            headers: {
+              Urgency: 'high'
+            },
             fcmOptions: { link: 'https://kwabz-store-v2.vercel.app/account.html' },
             notification: {
               icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
@@ -572,7 +602,17 @@ function setupBackgroundSync() {
             product_id: notifData.product_id || '',
             url: productUrl
           },
+          android: { priority: 'high' },
+          apns: {
+            headers: {
+              'apns-priority': '10',
+              'apns-push-type': 'alert'
+            }
+          },
           webpush: {
+            headers: {
+              Urgency: 'high'
+            },
             fcmOptions: { link: productUrl },
             notification: {
               icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
