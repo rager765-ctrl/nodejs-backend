@@ -94,7 +94,7 @@ try {
     url: process.env.UPSTASH_REDIS_REST_URL,
     token: process.env.UPSTASH_REDIS_REST_TOKEN,
   });
-
+  
   // Test connection
   redisClient.get('ping').then(() => {
     console.log('✅ Connected to Upstash Redis cache backend successfully.');
@@ -189,7 +189,8 @@ let unsubscribers = {
   blogPosts: null,
   promoCodes: null,
   broadcasts: null,
-  productNotifications: null
+  orders: null,
+  communications: null
 };
 
 function setupBackgroundSync() {
@@ -198,7 +199,7 @@ function setupBackgroundSync() {
     return;
   }
 
-  console.log('🔄 Setting up background Firestore Live-Sync listeners...');
+  console.log('🔄 Setting up background Firestore Live-Sync listeners + FCM push...');
 
   // 1. Live Products Listener
   unsubscribers.products = db.collection('products')
@@ -236,15 +237,113 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] Sellers snapshot failed:', err.message);
     });
 
-  // 3.5. Live Orders Listener (for Admin Dashboard)
+  // 3.5. Live Orders Listener — Admin Dashboard cache + FCM push on status change
+  const _orderStatusCache = new Map(); // orderId -> last known status
+  let _ordersInitialLoad = true;
+
   unsubscribers.orders = db.collection('orders')
     .orderBy('created_at', 'desc')
     .limit(200)
     .onSnapshot(async snapshot => {
-      console.log(`[Firestore Sync] orders collection updated. Syncing ${snapshot.size} items.`);
       const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       await setCacheValue(cacheKeys.orders, orders);
       io.emit('orders_changed', cache.orders);
+
+      // Skip pushing on initial load — only push on actual mutations
+      if (_ordersInitialLoad) {
+        _ordersInitialLoad = false;
+        // Seed the status cache from the initial snapshot
+        snapshot.docs.forEach(doc => {
+          _orderStatusCache.set(doc.id, doc.data().status);
+        });
+        return;
+      }
+
+      // Detect status changes on modified docs and push to the customer
+      for (const change of snapshot.docChanges()) {
+        if (change.type !== 'modified') continue;
+
+        const orderId  = change.doc.id;
+        const data     = change.doc.data();
+        const newStatus = data.status || 'pending';
+        const oldStatus = _orderStatusCache.get(orderId);
+
+        // Update cache
+        _orderStatusCache.set(orderId, newStatus);
+
+        // Only push if status actually changed
+        if (oldStatus === newStatus) continue;
+
+        const customerUid = data.customer_uid;
+        const orderLabel  = data.order_label || data.order_number || orderId.slice(-6).toUpperCase();
+        const customerName = data.customer?.name || 'Customer';
+
+        console.log(`[FCM] Order ${orderLabel} status: ${oldStatus} → ${newStatus} (uid: ${customerUid || 'guest'})`);
+
+        // Guest orders have no uid — nothing to push to
+        if (!customerUid || customerUid === 'guest') continue;
+
+        // Find all FCM tokens for this specific user
+        let tokens = [];
+        try {
+          const snap = await db.collection('fcm_tokens')
+            .where('uid', '==', customerUid)
+            .get();
+          tokens = snap.docs
+            .map(d => d.data().token || d.id)
+            .filter(t => typeof t === 'string' && t.length > 0);
+        } catch (e) {
+          console.warn(`[FCM] Could not fetch tokens for uid ${customerUid}:`, e.message);
+        }
+
+        if (tokens.length === 0) continue;
+
+        // Status-specific messaging
+        const STATUS_LABELS = {
+          confirmed:  { emoji: '✅', msg: `Your order ${orderLabel} has been confirmed!` },
+          shipped:    { emoji: '🚚', msg: `Your order ${orderLabel} is on its way!` },
+          delivered:  { emoji: '🎉', msg: `Your order ${orderLabel} has been delivered. Enjoy!` },
+          cancelled:  { emoji: '❌', msg: `Your order ${orderLabel} was cancelled. Contact us for details.` },
+          processing: { emoji: '⚙️', msg: `Your order ${orderLabel} is being processed.` },
+          pending:    { emoji: '⏳', msg: `Your order ${orderLabel} is pending confirmation.` },
+        };
+        const label = STATUS_LABELS[newStatus] || { emoji: '📦', msg: `Order ${orderLabel} status updated to ${newStatus}.` };
+        const receiptUrl = `https://kwabz-store-v2.vercel.app/receipt.html?id=${orderId}`;
+
+        const push = {
+          notification: {
+            title: `${label.emoji} Order Update — Kwabz Store`,
+            body: label.msg
+          },
+          data: { order_id: orderId, url: receiptUrl },
+          webpush: {
+            fcmOptions: { link: receiptUrl },
+            notification: {
+              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
+              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png'
+            }
+          },
+          tokens
+        };
+
+        try {
+          const messaging = getMessaging();
+          const resp = await messaging.sendEachForMulticast(push);
+          console.log(`[FCM] Order push to ${customerName}: ${resp.successCount} ok, ${resp.failureCount} failed.`);
+
+          // Cleanup stale tokens
+          resp.responses.forEach((r, i) => {
+            if (!r.success) {
+              const code = r.error?.code || '';
+              if (code.includes('not-registered') || code.includes('invalid-registration-token')) {
+                db.collection('fcm_tokens').doc(tokens[i]).delete().catch(() => {});
+              }
+            }
+          });
+        } catch (e) {
+          console.error('[FCM] Order status push failed:', e.message);
+        }
+      }
     }, err => {
       console.error('[Firestore Sync] Orders snapshot failed:', err.message);
     });
@@ -273,19 +372,262 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] Promo codes snapshot failed:', err.message);
     });
 
-  // 7. Live Broadcasts Listener
+  // 7. Live Broadcasts Listener — cache sync + FCM push to all users on new broadcast
+  let _broadcastsInitialLoad = true;
+
   unsubscribers.broadcasts = db.collection('broadcasts')
     .onSnapshot(async snapshot => {
-      console.log(`[Firestore Sync] broadcasts collection updated. Syncing ${snapshot.size} items.`);
       const broadcasts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       broadcasts.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
       await setCacheValue(cacheKeys.broadcasts, broadcasts);
       io.emit('broadcasts_changed', cache.broadcasts);
+
+      if (_broadcastsInitialLoad) { _broadcastsInitialLoad = false; return; }
+
+      // Push to all users when a new broadcast is added by admin
+      for (const change of snapshot.docChanges()) {
+        if (change.type !== 'added') continue;
+
+        const bd = change.doc.data();
+        // Skip if already pushed
+        if (bd.fcm_sent) continue;
+
+        console.log(`[FCM] New broadcast: "${bd.title || 'Announcement'}". Pushing to all devices...`);
+
+        try {
+          // Mark as pushed first to prevent duplicate sends
+          await db.collection('broadcasts').doc(change.doc.id).update({ fcm_sent: true });
+        } catch (_) {}
+
+        let tokens = [];
+        try {
+          const snap = await db.collection('fcm_tokens').get();
+          tokens = snap.docs.map(d => d.data().token || d.id).filter(t => t && t.length > 0);
+        } catch (e) {
+          console.warn('[FCM] Could not fetch tokens for broadcast:', e.message);
+        }
+
+        if (tokens.length === 0) continue;
+
+        const push = {
+          notification: {
+            title: `📢 ${bd.title || 'Kwabz Store Update'}`,
+            body: bd.message || bd.body || 'Tap to view the latest announcement.'
+          },
+          data: { url: 'https://kwabz-store-v2.vercel.app/shop.html' },
+          webpush: {
+            fcmOptions: { link: 'https://kwabz-store-v2.vercel.app/shop.html' },
+            notification: {
+              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
+              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png'
+            }
+          },
+          tokens
+        };
+
+        try {
+          const messaging = getMessaging();
+          const resp = await messaging.sendEachForMulticast(push);
+          console.log(`[FCM] Broadcast push: ${resp.successCount} ok, ${resp.failureCount} failed.`);
+        } catch (e) {
+          console.error('[FCM] Broadcast push failed:', e.message);
+        }
+      }
     }, err => {
       console.error('[Firestore Sync] Broadcasts snapshot failed:', err.message);
     });
 
-  // 4. Live Settings Document Listener
+  // 7.5. Communications listener — push to user when admin sends a chat reply
+  let _commsInitialLoad = true;
+
+  unsubscribers.communications = db.collection('communications')
+    .where('type', '==', 'chat')
+    .where('sender_id', '==', 'admin')
+    .onSnapshot(async snapshot => {
+      if (_commsInitialLoad) { _commsInitialLoad = false; return; }
+
+      for (const change of snapshot.docChanges()) {
+        if (change.type !== 'added') continue;
+
+        const msg = change.doc.data();
+        // conversation_id is the customer's uid (set by shell.js)
+        const customerUid = msg.receiver_id || msg.conversation_id;
+        if (!customerUid || customerUid === 'admin') continue;
+
+        console.log(`[FCM] Admin replied to chat session ${customerUid}. Sending push...`);
+
+        let tokens = [];
+        try {
+          const snap = await db.collection('fcm_tokens')
+            .where('uid', '==', customerUid)
+            .get();
+          tokens = snap.docs.map(d => d.data().token || d.id).filter(t => t && t.length > 0);
+        } catch (e) {
+          console.warn('[FCM] Could not fetch tokens for chat push:', e.message);
+        }
+
+        if (tokens.length === 0) continue;
+
+        const senderName = msg.sender_name || 'Kwabz Support';
+        const chatText   = msg.message || '...';
+
+        const push = {
+          notification: {
+            title: `💬 ${senderName}`,
+            body: chatText.length > 80 ? chatText.slice(0, 77) + '...' : chatText
+          },
+          data: { url: 'https://kwabz-store-v2.vercel.app/account.html' },
+          webpush: {
+            fcmOptions: { link: 'https://kwabz-store-v2.vercel.app/account.html' },
+            notification: {
+              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
+              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png',
+              tag: `kwabz-chat-${customerUid}`,
+              renotify: true
+            }
+          },
+          tokens
+        };
+
+        try {
+          const messaging = getMessaging();
+          const resp = await messaging.sendEachForMulticast(push);
+          console.log(`[FCM] Chat push sent: ${resp.successCount} ok, ${resp.failureCount} failed.`);
+
+          // Cleanup stale tokens
+          resp.responses.forEach((r, i) => {
+            if (!r.success) {
+              const code = r.error?.code || '';
+              if (code.includes('not-registered') || code.includes('invalid-registration-token')) {
+                db.collection('fcm_tokens').doc(tokens[i]).delete().catch(() => {});
+              }
+            }
+          });
+        } catch (e) {
+          console.error('[FCM] Chat push failed:', e.message);
+        }
+      }
+    }, err => {
+      console.error('[Firestore Sync] Communications snapshot failed:', err.message);
+    });
+
+  // 8. product_notifications listener → FCM multicast fan-out
+  // Written by the client (store.js) when a new product is added.
+  // This listener reads it, fetches all user FCM tokens, and sends a push.
+  db.collection('product_notifications')
+    .where('notified', '!=', true)         // Only unprocessed docs
+    .onSnapshot(async snapshot => {
+      if (snapshot.empty) return;
+
+      for (const change of snapshot.docChanges()) {
+        if (change.type !== 'added') continue;
+
+        const notifDoc = change.doc;
+        const notifData = notifDoc.data();
+
+        console.log(`[FCM] New product notification: "${notifData.name}" (id: ${notifDoc.id})`);
+
+        // Mark as processed immediately to prevent duplicate sends on server restart
+        try {
+          await db.collection('product_notifications').doc(notifDoc.id).update({ notified: true });
+        } catch (markErr) {
+          console.warn('[FCM] Could not mark notification as processed:', markErr.message);
+        }
+
+        // Fetch all FCM tokens from the dedicated fcm_tokens collection
+        // (Shell.js stores tokens here as: fcm_tokens/{token} = { token, uid, ... })
+        let tokens = [];
+        try {
+          const tokensSnap = await db.collection('fcm_tokens').get();
+
+          tokens = tokensSnap.docs
+            .map(d => d.data().token || d.id)    // doc ID is the token
+            .filter(t => typeof t === 'string' && t.trim().length > 0);
+
+          console.log(`[FCM] Found ${tokens.length} registered device token(s) to notify.`);
+        } catch (fetchErr) {
+          console.error('[FCM] Failed to fetch FCM tokens:', fetchErr.message);
+          continue;
+        }
+
+        if (tokens.length === 0) {
+          // No registered users — this is normal, not a bug. Log info-level only.
+          console.log('[FCM] No FCM tokens registered yet — skipping push for this notification.');
+          continue;
+        }
+
+        // Build the multicast FCM message
+        const productUrl = `https://kwabz-store-v2.vercel.app/product-detail.html?id=${notifData.product_id || ''}`;
+        const message = {
+          notification: {
+            title: `🛍️ New Drop: ${notifData.name || 'New Item'}`,
+            body: `Now available for GH₵ ${
+              notifData.discount > 0
+                ? ((notifData.price || 0) * (1 - notifData.discount / 100)).toFixed(2)
+                : (notifData.price || 0).toFixed(2)
+            } — Tap to view!`,
+            imageUrl: notifData.image_url || undefined
+          },
+          data: {
+            product_id: notifData.product_id || '',
+            url: productUrl
+          },
+          webpush: {
+            fcmOptions: { link: productUrl },
+            notification: {
+              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
+              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png'
+            }
+          },
+          tokens: tokens
+        };
+
+        // Send multicast push
+        try {
+          const messaging = getMessaging();
+          const response = await messaging.sendEachForMulticast(message);
+
+          console.log(`[FCM] Push sent: ${response.successCount} success, ${response.failureCount} failed.`);
+
+          // Clean up stale/invalid tokens from Firestore
+          if (response.failureCount > 0) {
+            const staleTokens = [];
+            response.responses.forEach((resp, idx) => {
+              if (!resp.success) {
+                const errCode = resp.error?.code || '';
+                if (
+                  errCode === 'messaging/registration-token-not-registered' ||
+                  errCode === 'messaging/invalid-registration-token'
+                ) {
+                  staleTokens.push(tokens[idx]);
+                } else {
+                  console.warn(`[FCM] Token send failed (non-stale):`, resp.error?.message);
+                }
+              }
+            });
+
+            // Remove stale tokens from the fcm_tokens collection
+            if (staleTokens.length > 0) {
+              console.log(`[FCM] Removing ${staleTokens.length} stale token(s) from fcm_tokens...`);
+              const batch = db.batch();
+              staleTokens.forEach(token => {
+                batch.delete(db.collection('fcm_tokens').doc(token));
+              });
+              await batch.commit();
+              console.log('[FCM] Stale token cleanup complete.');
+            }
+          }
+        } catch (sendErr) {
+          console.error('[FCM] Multicast send failed:', sendErr.message);
+        }
+      }
+    }, err => {
+      console.error('[Firestore Sync] product_notifications snapshot failed:', err.message);
+    });
+
+  console.log('✅ Background Firestore listeners + FCM fan-out ready.');
+
+  // Settings Document Listener (must remain last — depends on others being set up)
   unsubscribers.settings = db.collection('settings').doc('global')
     .onSnapshot(async doc => {
       if (doc.exists) {
@@ -296,114 +638,6 @@ function setupBackgroundSync() {
     }, err => {
       console.error('[Firestore Sync] Settings snapshot failed:', err.message);
     });
-
-  // 8. Live Product Notifications Listener (triggers FCM push notifications to all registered tokens)
-  unsubscribers.productNotifications = db.collection('product_notifications')
-    .onSnapshot(async snapshot => {
-      snapshot.docChanges().forEach(async change => {
-        if (change.type === 'added') {
-          const data = change.doc.data();
-          const docCreatedAt = getSafeTime(data.created_at);
-          // If the notification document is fresh (created in the last 2 minutes)
-          if (Date.now() - docCreatedAt < 120000) {
-            console.log(`[Push Notification] New product notification detected: ${data.name}. Sending to FCM subscribers...`);
-            await sendPushNotificationToAll({
-              title: '🛍️ New Arrival at Kwabz Store!',
-              body: `${data.name} | GH₵ ${Number(data.price).toFixed(2)}`,
-              image: data.image_url || '',
-              productId: data.product_id || ''
-            });
-          }
-        }
-      });
-    }, err => {
-      console.error('[Firestore Sync] Product notifications snapshot failed:', err.message);
-    });
-}
-
-// ─── FCM Broadcast Helper ────────────────────────────────────
-async function sendPushNotificationToAll({ title, body, image, productId }) {
-  if (!isFirebaseOnline || !db) {
-    console.warn('[Push Notification] Cannot send, Firebase is offline.');
-    return;
-  }
-
-  try {
-    const snapshot = await db.collection('fcm_tokens').get();
-    if (snapshot.empty) {
-      console.log('[Push Notification] No registered FCM tokens found.');
-      return;
-    }
-
-    const tokens = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      if (data.token) {
-        tokens.push(data.token);
-      }
-    });
-
-    console.log(`[Push Notification] Broadcasting to ${tokens.length} subscribers...`);
-
-    const chunkSize = 500;
-    for (let i = 0; i < tokens.length; i += chunkSize) {
-      const tokenBatch = tokens.slice(i, i + chunkSize);
-      
-      const message = {
-        tokens: tokenBatch,
-        notification: {
-          title: title,
-          body: body,
-        },
-        data: {
-          product_id: productId || ''
-        }
-      };
-
-      if (image) {
-        message.notification.image = image;
-      }
-
-      message.webpush = {
-        headers: {
-          TTL: '86400'
-        },
-        notification: {
-          icon: '/icon-192x192.png',
-          badge: '/icon-72x72.png',
-          image: image || undefined,
-          actions: [
-            { action: 'view', title: '👀 View Product' }
-          ]
-        },
-        fcmOptions: {
-          link: productId ? `/product-detail.html?id=${productId}` : '/shop.html'
-        }
-      };
-
-      const response = await getMessaging().sendEachForMulticast(message);
-      console.log(`[Push Notification] Batch sent. Success: ${response.successCount}, Failure: ${response.failureCount}`);
-
-      if (response.failureCount > 0) {
-        const batchCleanup = db.batch();
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success) {
-            const error = resp.error;
-            if (error.code === 'messaging/invalid-registration-token' ||
-                error.code === 'messaging/registration-token-not-registered') {
-              const invalidToken = tokenBatch[idx];
-              const docRef = db.collection('fcm_tokens').doc(invalidToken);
-              batchCleanup.delete(docRef);
-            }
-          }
-        });
-        await batchCleanup.commit();
-        console.log('[Push Notification] Cleaned up unregistered tokens from database.');
-      }
-    }
-  } catch (err) {
-    console.error('[Push Notification] Failed to broadcast FCM notifications:', err);
-  }
 }
 
 // ─── Memory Visitor Heartbeat Sweep Task ─────────────────────
@@ -632,58 +866,6 @@ app.get('/api/orders', async (req, res) => {
   }
 });
 
-// 10. Track Order by Ref ID
-app.get('/api/orders/track/:refId', async (req, res) => {
-  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'DB unavailable' });
-  try {
-    const cleanId = req.params.refId.trim();
-    const cleanIdUpper = cleanId.toUpperCase();
-    
-    // 1. By ID
-    let snap = await db.collection('orders').doc(cleanId).get();
-    if (snap.exists) return res.json(snap.data());
-
-    // 2. By order_label
-    let querySnap = await db.collection('orders').where('order_label', '==', cleanIdUpper).limit(1).get();
-    if (!querySnap.empty) return res.json(querySnap.docs[0].data());
-
-    // 3. By order_number
-    let hashNum = cleanIdUpper.startsWith('#') ? cleanIdUpper : '#' + cleanIdUpper;
-    querySnap = await db.collection('orders').where('order_number', '==', hashNum).limit(1).get();
-    if (!querySnap.empty) return res.json(querySnap.docs[0].data());
-
-    // 4. By ref_id (numeric)
-    const numRef = parseInt(cleanId, 10);
-    if (!isNaN(numRef)) {
-      querySnap = await db.collection('orders').where('ref_id', '==', numRef).limit(1).get();
-      if (!querySnap.empty) return res.json(querySnap.docs[0].data());
-    }
-    
-    res.status(404).json({ error: 'Order not found' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 11. Request Seller Activation PIN
-app.post('/api/seller-pins', express.json(), async (req, res) => {
-  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'DB unavailable' });
-  try {
-    const from = req.body.from || 'unknown';
-    const pinStr = Math.floor(100000 + Math.random() * 900000).toString();
-    const pinId = 'KBZ-' + pinStr;
-    await db.collection('seller_pins').doc(pinId).set({
-      pin: pinId,
-      status: 'pending',
-      requested_by: from,
-      created_at: admin.firestore.FieldValue.serverTimestamp()
-    });
-    res.json({ success: true, pin: pinId });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // 10. Fetch Product Reviews (With in-memory/Redis caching)
 app.get('/api/blog-posts', (req, res) => {
   res.json(cache.blogPosts.length > 0 ? cache.blogPosts : []);
@@ -770,10 +952,13 @@ app.get('/api/reviews/user/:uid', async (req, res) => {
 
   const cacheKey = `kwabz:reviews:user:${uid}`;
 
+  // Try Redis/memory cache first
   if (isRedisOnline && redisClient) {
     try {
       const data = await redisClient.get(cacheKey);
-      if (data) return res.json(typeof data === 'string' ? JSON.parse(data) : data);
+      if (data) {
+        return res.json(typeof data === 'string' ? JSON.parse(data) : data);
+      }
     } catch (err) {
       console.warn('[Redis] User reviews read failed:', err.message);
     }
@@ -789,9 +974,12 @@ app.get('/api/reviews/user/:uid', async (req, res) => {
       const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
       return tb - ta;
     });
+
+    // Cache for 2 minutes
     if (isRedisOnline && redisClient) {
       try { await redisClient.set(cacheKey, JSON.stringify(reviews), { ex: 120 }); } catch (_) {}
     }
+
     res.json(reviews);
   } catch (err) {
     console.error('Failed to fetch user reviews:', err);
