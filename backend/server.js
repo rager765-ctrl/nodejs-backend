@@ -879,10 +879,10 @@ app.post('/api/orders', async (req, res) => {
   try {
     const orderData = req.body;
     const customerUid = orderData.customer_uid;
-    if (customerUid) {
+    if (customerUid && orderData.order_method === 'wallet') {
       const userDoc = await db.collection('users').doc(customerUid).get();
       if (userDoc.exists && userDoc.data().wallet_locked === true) {
-        return res.status(403).json({ error: 'Your account/wallet is locked. Checkout is disabled.' });
+        return res.status(403).json({ error: 'Your wallet is locked. Wallet checkout is disabled.' });
       }
     }
     orderData.created_at = orderData.created_at || new Date().toISOString();
