@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
 import http, { createServer } from 'http';
 import https from 'https';
 import { Server } from 'socket.io';
@@ -187,7 +188,9 @@ let unsubscribers = {
   settings: null,
   blogPosts: null,
   promoCodes: null,
-  broadcasts: null
+  broadcasts: null,
+  orders: null,
+  communications: null
 };
 
 function setupBackgroundSync() {
@@ -196,7 +199,7 @@ function setupBackgroundSync() {
     return;
   }
 
-  console.log('🔄 Setting up background Firestore Live-Sync listeners...');
+  console.log('🔄 Setting up background Firestore Live-Sync listeners + FCM push...');
 
   // 1. Live Products Listener
   unsubscribers.products = db.collection('products')
@@ -234,15 +237,123 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] Sellers snapshot failed:', err.message);
     });
 
-  // 3.5. Live Orders Listener (for Admin Dashboard)
+  // 3.5. Live Orders Listener — Admin Dashboard cache + FCM push on status change
+  const _orderStatusCache = new Map(); // orderId -> last known status
+  let _ordersInitialLoad = true;
+
   unsubscribers.orders = db.collection('orders')
     .orderBy('created_at', 'desc')
     .limit(200)
     .onSnapshot(async snapshot => {
-      console.log(`[Firestore Sync] orders collection updated. Syncing ${snapshot.size} items.`);
       const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       await setCacheValue(cacheKeys.orders, orders);
       io.emit('orders_changed', cache.orders);
+
+      // Skip pushing on initial load — only push on actual mutations
+      if (_ordersInitialLoad) {
+        _ordersInitialLoad = false;
+        // Seed the status cache from the initial snapshot
+        snapshot.docs.forEach(doc => {
+          _orderStatusCache.set(doc.id, doc.data().status);
+        });
+        return;
+      }
+
+      // Detect status changes on modified docs and push to the customer
+      for (const change of snapshot.docChanges()) {
+        if (change.type !== 'modified') continue;
+
+        const orderId  = change.doc.id;
+        const data     = change.doc.data();
+        const newStatus = data.status || 'pending';
+        const oldStatus = _orderStatusCache.get(orderId);
+
+        // Update cache
+        _orderStatusCache.set(orderId, newStatus);
+
+        // Only push if status actually changed
+        if (oldStatus === newStatus) continue;
+
+        const customerUid = data.customer_uid;
+        const orderLabel  = data.order_label || data.order_number || orderId.slice(-6).toUpperCase();
+        const customerName = data.customer?.name || 'Customer';
+
+        console.log(`[FCM] Order ${orderLabel} status: ${oldStatus} → ${newStatus} (uid: ${customerUid || 'guest'})`);
+
+        // Guest orders have no uid — nothing to push to
+        if (!customerUid || customerUid === 'guest') continue;
+
+        // Find all FCM tokens for this specific user
+        let tokens = [];
+        try {
+          const snap = await db.collection('fcm_tokens')
+            .where('uid', '==', customerUid)
+            .get();
+          tokens = snap.docs
+            .map(d => d.data().token || d.id)
+            .filter(t => typeof t === 'string' && t.length > 0);
+        } catch (e) {
+          console.warn(`[FCM] Could not fetch tokens for uid ${customerUid}:`, e.message);
+        }
+
+        if (tokens.length === 0) continue;
+
+        // Status-specific messaging
+        const STATUS_LABELS = {
+          confirmed:  { emoji: '✅', msg: `Your order ${orderLabel} has been confirmed!` },
+          shipped:    { emoji: '🚚', msg: `Your order ${orderLabel} is on its way!` },
+          delivered:  { emoji: '🎉', msg: `Your order ${orderLabel} has been delivered. Enjoy!` },
+          cancelled:  { emoji: '❌', msg: `Your order ${orderLabel} was cancelled. Contact us for details.` },
+          processing: { emoji: '⚙️', msg: `Your order ${orderLabel} is being processed.` },
+          pending:    { emoji: '⏳', msg: `Your order ${orderLabel} is pending confirmation.` },
+        };
+        const label = STATUS_LABELS[newStatus] || { emoji: '📦', msg: `Order ${orderLabel} status updated to ${newStatus}.` };
+        const receiptUrl = `https://kwabz-store-v2.vercel.app/receipt.html?id=${orderId}`;
+
+        const push = {
+          notification: {
+            title: `${label.emoji} Order Update — Kwabz Store`,
+            body: label.msg
+          },
+          data: { order_id: orderId, url: receiptUrl },
+          android: { priority: 'high' },
+          apns: {
+            headers: {
+              'apns-priority': '10',
+              'apns-push-type': 'alert'
+            }
+          },
+          webpush: {
+            headers: {
+              Urgency: 'high'
+            },
+            fcmOptions: { link: receiptUrl },
+            notification: {
+              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
+              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png'
+            }
+          },
+          tokens
+        };
+
+        try {
+          const messaging = getMessaging();
+          const resp = await messaging.sendEachForMulticast(push);
+          console.log(`[FCM] Order push to ${customerName}: ${resp.successCount} ok, ${resp.failureCount} failed.`);
+
+          // Cleanup stale tokens
+          resp.responses.forEach((r, i) => {
+            if (!r.success) {
+              const code = r.error?.code || '';
+              if (code.includes('not-registered') || code.includes('invalid-registration-token')) {
+                db.collection('fcm_tokens').doc(tokens[i]).delete().catch(() => {});
+              }
+            }
+          });
+        } catch (e) {
+          console.error('[FCM] Order status push failed:', e.message);
+        }
+      }
     }, err => {
       console.error('[Firestore Sync] Orders snapshot failed:', err.message);
     });
@@ -271,19 +382,292 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] Promo codes snapshot failed:', err.message);
     });
 
-  // 7. Live Broadcasts Listener
+  // 7. Live Broadcasts Listener — cache sync + FCM push to all users on new broadcast
+  let _broadcastsInitialLoad = true;
+
   unsubscribers.broadcasts = db.collection('broadcasts')
     .onSnapshot(async snapshot => {
-      console.log(`[Firestore Sync] broadcasts collection updated. Syncing ${snapshot.size} items.`);
       const broadcasts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       broadcasts.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
       await setCacheValue(cacheKeys.broadcasts, broadcasts);
       io.emit('broadcasts_changed', cache.broadcasts);
+
+      if (_broadcastsInitialLoad) { _broadcastsInitialLoad = false; return; }
+
+      // Push to all users when a new broadcast is added by admin
+      for (const change of snapshot.docChanges()) {
+        if (change.type !== 'added') continue;
+
+        const bd = change.doc.data();
+        // Skip if already pushed
+        if (bd.fcm_sent) continue;
+
+        console.log(`[FCM] New broadcast: "${bd.title || 'Announcement'}". Pushing to all devices...`);
+
+        try {
+          // Mark as pushed first to prevent duplicate sends
+          await db.collection('broadcasts').doc(change.doc.id).update({ fcm_sent: true });
+        } catch (_) {}
+
+        let tokens = [];
+        try {
+          const snap = await db.collection('fcm_tokens').get();
+          tokens = snap.docs.map(d => d.data().token || d.id).filter(t => t && t.length > 0);
+        } catch (e) {
+          console.warn('[FCM] Could not fetch tokens for broadcast:', e.message);
+        }
+
+        if (tokens.length === 0) continue;
+
+        const push = {
+          notification: {
+            title: `📢 ${bd.title || 'Kwabz Store Update'}`,
+            body: bd.message || bd.body || 'Tap to view the latest announcement.'
+          },
+          data: { url: 'https://kwabz-store-v2.vercel.app/shop.html' },
+          android: { priority: 'high' },
+          apns: {
+            headers: {
+              'apns-priority': '10',
+              'apns-push-type': 'alert'
+            }
+          },
+          webpush: {
+            headers: {
+              Urgency: 'high'
+            },
+            fcmOptions: { link: 'https://kwabz-store-v2.vercel.app/shop.html' },
+            notification: {
+              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
+              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png'
+            }
+          },
+          tokens
+        };
+
+        try {
+          const messaging = getMessaging();
+          const resp = await messaging.sendEachForMulticast(push);
+          console.log(`[FCM] Broadcast push: ${resp.successCount} ok, ${resp.failureCount} failed.`);
+        } catch (e) {
+          console.error('[FCM] Broadcast push failed:', e.message);
+        }
+      }
     }, err => {
       console.error('[Firestore Sync] Broadcasts snapshot failed:', err.message);
     });
 
-  // 4. Live Settings Document Listener
+  // 7.5. Communications listener — push to user when admin sends a chat reply
+  let _commsInitialLoad = true;
+
+  unsubscribers.communications = db.collection('communications')
+    .where('type', '==', 'chat')
+    .where('sender_id', '==', 'admin')
+    .onSnapshot(async snapshot => {
+      if (_commsInitialLoad) { _commsInitialLoad = false; return; }
+
+      for (const change of snapshot.docChanges()) {
+        if (change.type !== 'added') continue;
+
+        const msg = change.doc.data();
+        // conversation_id is the customer's uid (set by shell.js)
+        const customerUid = msg.receiver_id || msg.conversation_id;
+        if (!customerUid || customerUid === 'admin') continue;
+
+        console.log(`[FCM] Admin replied to chat session ${customerUid}. Sending push...`);
+
+        let tokens = [];
+        try {
+          const snap = await db.collection('fcm_tokens')
+            .where('uid', '==', customerUid)
+            .get();
+          tokens = snap.docs.map(d => d.data().token || d.id).filter(t => t && t.length > 0);
+        } catch (e) {
+          console.warn('[FCM] Could not fetch tokens for chat push:', e.message);
+        }
+
+        if (tokens.length === 0) continue;
+
+        const senderName = msg.sender_name || 'Kwabz Support';
+        const chatText   = msg.message || '...';
+
+        const push = {
+          notification: {
+            title: `💬 ${senderName}`,
+            body: chatText.length > 80 ? chatText.slice(0, 77) + '...' : chatText
+          },
+          data: { url: 'https://kwabz-store-v2.vercel.app/account.html' },
+          android: { priority: 'high' },
+          apns: {
+            headers: {
+              'apns-priority': '10',
+              'apns-push-type': 'alert'
+            }
+          },
+          webpush: {
+            headers: {
+              Urgency: 'high'
+            },
+            fcmOptions: { link: 'https://kwabz-store-v2.vercel.app/account.html' },
+            notification: {
+              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
+              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png',
+              tag: `kwabz-chat-${customerUid}`,
+              renotify: true
+            }
+          },
+          tokens
+        };
+
+        try {
+          const messaging = getMessaging();
+          const resp = await messaging.sendEachForMulticast(push);
+          console.log(`[FCM] Chat push sent: ${resp.successCount} ok, ${resp.failureCount} failed.`);
+
+          // Cleanup stale tokens
+          resp.responses.forEach((r, i) => {
+            if (!r.success) {
+              const code = r.error?.code || '';
+              if (code.includes('not-registered') || code.includes('invalid-registration-token')) {
+                db.collection('fcm_tokens').doc(tokens[i]).delete().catch(() => {});
+              }
+            }
+          });
+        } catch (e) {
+          console.error('[FCM] Chat push failed:', e.message);
+        }
+      }
+    }, err => {
+      console.error('[Firestore Sync] Communications snapshot failed:', err.message);
+    });
+
+  // 8. product_notifications listener → FCM multicast fan-out
+  // Written by the client (store.js) when a new product is added.
+  // This listener reads it, fetches all user FCM tokens, and sends a push.
+  db.collection('product_notifications')
+    .where('notified', '!=', true)         // Only unprocessed docs
+    .onSnapshot(async snapshot => {
+      if (snapshot.empty) return;
+
+      for (const change of snapshot.docChanges()) {
+        if (change.type !== 'added') continue;
+
+        const notifDoc = change.doc;
+        const notifData = notifDoc.data();
+
+        console.log(`[FCM] New product notification: "${notifData.name}" (id: ${notifDoc.id})`);
+
+        // Mark as processed immediately to prevent duplicate sends on server restart
+        try {
+          await db.collection('product_notifications').doc(notifDoc.id).update({ notified: true });
+        } catch (markErr) {
+          console.warn('[FCM] Could not mark notification as processed:', markErr.message);
+        }
+
+        // Fetch all FCM tokens from the dedicated fcm_tokens collection
+        // (Shell.js stores tokens here as: fcm_tokens/{token} = { token, uid, ... })
+        let tokens = [];
+        try {
+          const tokensSnap = await db.collection('fcm_tokens').get();
+
+          tokens = tokensSnap.docs
+            .map(d => d.data().token || d.id)    // doc ID is the token
+            .filter(t => typeof t === 'string' && t.trim().length > 0);
+
+          console.log(`[FCM] Found ${tokens.length} registered device token(s) to notify.`);
+        } catch (fetchErr) {
+          console.error('[FCM] Failed to fetch FCM tokens:', fetchErr.message);
+          continue;
+        }
+
+        if (tokens.length === 0) {
+          // No registered users — this is normal, not a bug. Log info-level only.
+          console.log('[FCM] No FCM tokens registered yet — skipping push for this notification.');
+          continue;
+        }
+
+        // Build the multicast FCM message
+        const productUrl = `https://kwabz-store-v2.vercel.app/product-detail.html?id=${notifData.product_id || ''}`;
+        const message = {
+          notification: {
+            title: `🛍️ New Drop: ${notifData.name || 'New Item'}`,
+            body: `Now available for GH₵ ${
+              notifData.discount > 0
+                ? ((notifData.price || 0) * (1 - notifData.discount / 100)).toFixed(2)
+                : (notifData.price || 0).toFixed(2)
+            } — Tap to view!`,
+            imageUrl: notifData.image_url || undefined
+          },
+          data: {
+            product_id: notifData.product_id || '',
+            url: productUrl
+          },
+          android: { priority: 'high' },
+          apns: {
+            headers: {
+              'apns-priority': '10',
+              'apns-push-type': 'alert'
+            }
+          },
+          webpush: {
+            headers: {
+              Urgency: 'high'
+            },
+            fcmOptions: { link: productUrl },
+            notification: {
+              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
+              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png'
+            }
+          },
+          tokens: tokens
+        };
+
+        // Send multicast push
+        try {
+          const messaging = getMessaging();
+          const response = await messaging.sendEachForMulticast(message);
+
+          console.log(`[FCM] Push sent: ${response.successCount} success, ${response.failureCount} failed.`);
+
+          // Clean up stale/invalid tokens from Firestore
+          if (response.failureCount > 0) {
+            const staleTokens = [];
+            response.responses.forEach((resp, idx) => {
+              if (!resp.success) {
+                const errCode = resp.error?.code || '';
+                if (
+                  errCode === 'messaging/registration-token-not-registered' ||
+                  errCode === 'messaging/invalid-registration-token'
+                ) {
+                  staleTokens.push(tokens[idx]);
+                } else {
+                  console.warn(`[FCM] Token send failed (non-stale):`, resp.error?.message);
+                }
+              }
+            });
+
+            // Remove stale tokens from the fcm_tokens collection
+            if (staleTokens.length > 0) {
+              console.log(`[FCM] Removing ${staleTokens.length} stale token(s) from fcm_tokens...`);
+              const batch = db.batch();
+              staleTokens.forEach(token => {
+                batch.delete(db.collection('fcm_tokens').doc(token));
+              });
+              await batch.commit();
+              console.log('[FCM] Stale token cleanup complete.');
+            }
+          }
+        } catch (sendErr) {
+          console.error('[FCM] Multicast send failed:', sendErr.message);
+        }
+      }
+    }, err => {
+      console.error('[Firestore Sync] product_notifications snapshot failed:', err.message);
+    });
+
+  console.log('✅ Background Firestore listeners + FCM fan-out ready.');
+
+  // Settings Document Listener (must remain last — depends on others being set up)
   unsubscribers.settings = db.collection('settings').doc('global')
     .onSnapshot(async doc => {
       if (doc.exists) {
@@ -424,6 +808,12 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// 1.1 Lightweight Ping/Wake Endpoint (for external cron services like cron-job.org)
+// Point your external pinger HERE: /api/ping — minimal response, no Firebase reads
+app.get('/api/ping', (req, res) => {
+  res.json({ status: 'awake', ts: Date.now() });
+});
+
 // 2. Fetch Products (Serves instantly from memory cache!)
 app.get('/api/products', (req, res) => {
   res.json(cache.products.length > 0 ? cache.products : mockData.products);
@@ -488,6 +878,13 @@ app.post('/api/orders', async (req, res) => {
   }
   try {
     const orderData = req.body;
+    const customerUid = orderData.customer_uid;
+    if (customerUid && orderData.order_method === 'wallet') {
+      const userDoc = await db.collection('users').doc(customerUid).get();
+      if (userDoc.exists && userDoc.data().wallet_locked === true) {
+        return res.status(403).json({ error: 'Your wallet is locked. Wallet checkout is disabled.' });
+      }
+    }
     orderData.created_at = orderData.created_at || new Date().toISOString();
     const docRef = await db.collection('orders').add(orderData);
     res.status(201).json({ id: docRef.id, ...orderData });
@@ -595,6 +992,48 @@ app.post('/api/reviews', async (req, res) => {
   }
 });
 
+// 12. Fetch Reviews by User (for account.html My Reviews sheet)
+app.get('/api/reviews/user/:uid', async (req, res) => {
+  const { uid } = req.params;
+  if (!uid) return res.status(400).json({ error: 'uid is required' });
+
+  const cacheKey = `kwabz:reviews:user:${uid}`;
+
+  // Try Redis/memory cache first
+  if (isRedisOnline && redisClient) {
+    try {
+      const data = await redisClient.get(cacheKey);
+      if (data) {
+        return res.json(typeof data === 'string' ? JSON.parse(data) : data);
+      }
+    } catch (err) {
+      console.warn('[Redis] User reviews read failed:', err.message);
+    }
+  }
+
+  if (!isFirebaseOnline || !db) return res.json([]);
+
+  try {
+    const snap = await db.collection('reviews').where('user_id', '==', uid).get();
+    const reviews = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    reviews.sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return tb - ta;
+    });
+
+    // Cache for 2 minutes
+    if (isRedisOnline && redisClient) {
+      try { await redisClient.set(cacheKey, JSON.stringify(reviews), { ex: 120 }); } catch (_) {}
+    }
+
+    res.json(reviews);
+  } catch (err) {
+    console.error('Failed to fetch user reviews:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── WebSocket Event Handling ─────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected to Socket.IO: ${socket.id}`);
@@ -620,8 +1059,34 @@ io.on('connection', (socket) => {
 });
 
 // ─── Render 24/7 Keep-Alive Self-Ping ─────────────────────────
-// Free Render instances spin down after 15 minutes of inactivity.
-// We ping our own public URL every 8 minutes to keep the instance active and warm!
+// NOTE: Render free tier now IGNORES self-pings from the same instance.
+// The self-ping below is a fallback. For reliable uptime, point an EXTERNAL
+// free cron service (e.g. https://cron-job.org) to:
+//   GET  https://your-app.onrender.com/api/ping   (every 4 minutes)
+//
+// Set EXTERNAL_PING_URL in Render env vars to enable cross-service waking.
+
+function safePing(rawUrl, label) {
+  try {
+    const urlObj = new URL(rawUrl);
+    const client = urlObj.protocol === 'https:' ? https : http;
+    const req = client.get(urlObj.href, (res) => {
+      res.resume(); // Drain response body to free socket
+      console.log(`[Keep-Alive] ${label} ping → ${urlObj.hostname} : ${res.statusCode}`);
+    });
+    // Hard timeout: abort if no response within 10 seconds
+    req.setTimeout(10000, () => {
+      req.destroy();
+      console.warn(`[Keep-Alive] ${label} ping timed out for ${rawUrl}`);
+    });
+    req.on('error', (err) => {
+      console.warn(`[Keep-Alive] ${label} ping error (${urlObj.hostname}):`, err.message);
+    });
+  } catch (err) {
+    console.warn(`[Keep-Alive] Invalid URL skipped (${label}):`, err.message);
+  }
+}
+
 const candidateUrls = [
   process.env.RENDER_EXTERNAL_URL,
   process.env.SELF_URL,
@@ -629,28 +1094,20 @@ const candidateUrls = [
   'https://kwabz-store-backend.onrender.com'
 ].filter(Boolean);
 
-// Deduplicate candidate URLs and map to health endpoint
-const pingUrls = [...new Set(candidateUrls)].map(url => `${url.replace(/\/$/, '')}/api/health`);
+// Map to the lightweight /api/ping endpoint (not /api/health which does more work)
+const pingUrls = [...new Set(candidateUrls)].map(url => `${url.replace(/\/$/, '')}/api/ping`);
 
-console.log(`📡 Keep-Alive configured. Warming self-pings every 8 min for:`, pingUrls);
+console.log(`📡 Keep-Alive: Self-pinging every 4 min for:`, pingUrls);
 
+// Self-ping every 4 minutes (belt-and-suspenders; external cron is the true fix)
 setInterval(() => {
-  pingUrls.forEach(url => {
-    try {
-      const urlObj = new URL(url);
-      const client = urlObj.protocol === 'https:' ? https : http;
-      const req = client.get(urlObj.href, (res) => {
-        res.resume(); // Consume response data to free up memory and socket resources
-        console.log(`[Keep-Alive] Sent warming ping to ${urlObj.hostname}. Status: ${res.statusCode}`);
-      });
-      req.on('error', (err) => {
-        console.warn(`[Keep-Alive] Self-ping failed for ${urlObj.hostname}:`, err.message);
-      });
-    } catch (err) {
-      console.warn(`[Keep-Alive] Invalid ping URL: ${url}`, err.message);
-    }
-  });
-}, 8 * 60 * 1000); // Every 8 minutes — well under Render's 15-min sleep threshold
+  pingUrls.forEach(url => safePing(url, 'Self'));
+
+  // Also wake any external partner URL if configured (e.g., the WhatsApp bot server)
+  if (process.env.EXTERNAL_PING_URL) {
+    safePing(process.env.EXTERNAL_PING_URL, 'External');
+  }
+}, 4 * 60 * 1000); // Every 4 minutes
 
 // Start Server
 httpServer.listen(PORT, () => {
@@ -663,15 +1120,29 @@ httpServer.listen(PORT, () => {
   setupBackgroundSync();
 });
 
-// Graceful Shutdown
+// ─── Graceful Shutdown (Render rolling deploy / manual stop) ─────────────
 process.on('SIGTERM', () => {
-  console.log('Gracefully shutting down...');
-  if (unsubscribers.products) unsubscribers.products();
-  if (unsubscribers.categories) unsubscribers.categories();
-  if (unsubscribers.sellers) unsubscribers.sellers();
-  if (unsubscribers.settings) unsubscribers.settings();
+  console.log('[Render] SIGTERM received — rolling deploy or stop. Cleaning up...');
+  // Tear down ALL Firestore listeners to prevent dangling connections
+  Object.values(unsubscribers).forEach(unsub => { if (typeof unsub === 'function') unsub(); });
   httpServer.close(() => {
-    console.log('Server process terminated.');
+    console.log('[Render] HTTP server closed. Process exiting cleanly.');
     process.exit(0);
   });
+  // Force-exit after 10s if httpServer.close() hangs
+  setTimeout(() => {
+    console.warn('[Render] Force-exiting after 10s timeout.');
+    process.exit(1);
+  }, 10000).unref();
+});
+
+// ─── Process Crash Guards ─────────────────────────────────────────────────
+// Prevent a single unhandled async error from killing the entire server
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught Exception — server continuing:', err.message);
+  console.error(err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled Promise Rejection — server continuing:', reason);
 });
