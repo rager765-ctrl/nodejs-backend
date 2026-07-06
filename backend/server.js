@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
+import { getAuth } from 'firebase-admin/auth';
 import http, { createServer } from 'http';
 import https from 'https';
 import { Server } from 'socket.io';
@@ -703,6 +704,25 @@ setInterval(() => {
 
 // ─── REST API Routes ──────────────────────────────────────────
 
+// ─── Auth Middleware ─────────────────────────────────────────
+// Verifies a Firebase ID token sent as: Authorization: Bearer <idToken>
+// Apply to any endpoint that should be admin/authenticated only.
+async function verifyAdminToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized — missing or malformed Authorization header.' });
+  }
+  const idToken = authHeader.split('Bearer ')[1];
+  try {
+    const decoded = await getAuth().verifyIdToken(idToken);
+    req.user = decoded; // Attach decoded claims for downstream use
+    next();
+  } catch (err) {
+    console.warn('[Auth] Token verification failed:', err.message);
+    return res.status(403).json({ error: 'Forbidden — invalid or expired token.' });
+  }
+}
+
 // 0. Professional Status Landing Page
 app.get('/', (req, res) => {
   res.send(`
@@ -862,8 +882,8 @@ app.get('/api/visitor-count', (req, res) => {
   res.json({ count: activeVisitors.size });
 });
 
-// 7.5. Get Detailed Active Visitors
-app.get('/api/visitors/detailed', (req, res) => {
+// 7.5. Get Detailed Active Visitors (Admin Only)
+app.get('/api/visitors/detailed', verifyAdminToken, (req, res) => {
   const visitors = Array.from(activeVisitors.entries()).map(([vid, data]) => ({
     visitorId: vid,
     ...data
@@ -894,8 +914,8 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
-// 9. Admin Fetch Orders (Capped to 100 to prevent read explosion!)
-app.get('/api/orders', async (req, res) => {
+// 9. Admin Fetch Orders — Protected: requires valid Firebase ID token (Admin only)
+app.get('/api/orders', verifyAdminToken, async (req, res) => {
   if (!isFirebaseOnline || !db) {
     return res.status(503).json({ error: 'Database service is unavailable' });
   }
