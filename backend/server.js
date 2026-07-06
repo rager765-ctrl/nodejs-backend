@@ -723,6 +723,26 @@ async function verifyAdminToken(req, res, next) {
   }
 }
 
+// ─── IP Rate Limiter (In-Memory) ─────────────────────────────
+// Prevents abuse on open write endpoints (reviews, orders).
+// Key: IP address, Value: { count, resetAt }
+const _rateLimitStore = new Map();
+function checkRateLimit(ip, maxRequests = 10, windowMs = 60000) {
+  const now = Date.now();
+  const rec = _rateLimitStore.get(ip) || { count: 0, resetAt: now + windowMs };
+  if (now > rec.resetAt) { rec.count = 0; rec.resetAt = now + windowMs; }
+  rec.count++;
+  _rateLimitStore.set(ip, rec);
+  return rec.count > maxRequests; // true = blocked
+}
+// Sweep stale entries every 10 minutes to prevent memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _rateLimitStore.entries()) {
+    if (now > v.resetAt) _rateLimitStore.delete(k);
+  }
+}, 10 * 60 * 1000);
+
 // 0. Professional Status Landing Page
 app.get('/', (req, res) => {
   res.send(`
@@ -813,18 +833,12 @@ app.get('/', (req, res) => {
   `);
 });
 
-// 1. Healthcheck
+// 1. Healthcheck — sanitized: no infra metadata exposed publicly
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
-    firebase: isFirebaseOnline ? 'connected' : 'fallback_mock',
-    redis: isRedisOnline ? 'connected' : 'offline',
-    cacheSizes: {
-      products: cache.products.length,
-      categories: cache.categories.length,
-      sellers: cache.sellers.length
-    },
-    activeVisitors: activeVisitors.size
+    firebase: isFirebaseOnline ? 'connected' : 'offline',
+    redis: isRedisOnline ? 'connected' : 'offline'
   });
 });
 
@@ -893,11 +907,29 @@ app.get('/api/visitors/detailed', verifyAdminToken, (req, res) => {
 
 // 8. Order Placement Proxy
 app.post('/api/orders', async (req, res) => {
+  // Rate limit: max 20 orders per IP per minute (prevents order flooding)
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || 'unknown';
+  if (checkRateLimit(clientIp, 20, 60000)) {
+    return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+  }
+
   if (!isFirebaseOnline || !db) {
     return res.status(503).json({ error: 'Database service is unavailable' });
   }
+
+  const orderData = req.body;
+
+  // Schema guard: reject structurally invalid order payloads
+  const requiredFields = ['customer', 'items', 'total'];
+  const missingFields = requiredFields.filter(f => orderData[f] === undefined || orderData[f] === null);
+  if (missingFields.length > 0) {
+    return res.status(400).json({ error: `Missing required fields: ${missingFields.join(', ')}` });
+  }
+  if (!Array.isArray(orderData.items) || orderData.items.length === 0) {
+    return res.status(400).json({ error: 'Order must contain at least one item.' });
+  }
+
   try {
-    const orderData = req.body;
     const customerUid = orderData.customer_uid;
     if (customerUid && orderData.order_method === 'wallet') {
       const userDoc = await db.collection('users').doc(customerUid).get();
@@ -940,7 +972,11 @@ app.get('/api/blog-posts', (req, res) => {
 
 app.get('/api/promo-codes', (req, res) => {
   const list = cache.promoCodes.length > 0 ? cache.promoCodes : [];
-  const safeList = list.filter(p => p.active !== false && (!p.cash_limit || (p.total_discounted || 0) < p.cash_limit));
+  // Filter valid codes, then strip internal budget/audit fields before sending to client
+  const safeList = list
+    .filter(p => p.active !== false && (!p.cash_limit || (p.total_discounted || 0) < p.cash_limit))
+    .map(({ id, code, discount, discount_type, min_order, description, expires_at }) =>
+      ({ id, code, discount, discount_type, min_order, description, expires_at }));
   res.json(safeList);
 });
 
@@ -987,11 +1023,23 @@ app.get('/api/reviews/:productId', async (req, res) => {
 
 // 11. Add Review
 app.post('/api/reviews', async (req, res) => {
+  // Rate limit: max 5 reviews per IP per minute (prevents review bombing)
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || 'unknown';
+  if (checkRateLimit(clientIp, 5, 60000)) {
+    return res.status(429).json({ error: 'Too many review submissions. Please wait before trying again.' });
+  }
+
   if (!isFirebaseOnline || !db) {
     return res.status(503).json({ error: 'Database service is unavailable' });
   }
+
+  // Schema guard: reject structurally invalid review payloads
+  const reviewData = req.body;
+  if (!reviewData.product_id || !reviewData.rating || reviewData.rating < 1 || reviewData.rating > 5) {
+    return res.status(400).json({ error: 'Invalid review: product_id and a rating between 1-5 are required.' });
+  }
+
   try {
-    const reviewData = req.body;
     reviewData.created_at = reviewData.created_at || new Date().toISOString();
     const docRef = await db.collection('reviews').add(reviewData);
 
