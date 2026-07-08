@@ -52,7 +52,8 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -1023,6 +1024,40 @@ app.get('/api/visitors/detailed', requireAdmin, (req, res) => {
     ...data
   }));
   res.json({ count: visitors.length, visitors });
+});
+
+// 7.6. Cloudinary Proxy Upload Endpoint
+app.post('/api/upload', requireAdmin, async (req, res) => {
+  try {
+    const { file, uploadPreset, cloudName } = req.body;
+    if (!file || !uploadPreset || !cloudName) {
+      return res.status(400).json({ error: 'Missing required parameters: file, uploadPreset, cloudName' });
+    }
+
+    const formData = new URLSearchParams();
+    formData.append('file', file);
+    formData.append('upload_preset', uploadPreset);
+
+    const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+    const response = await fetch(cloudinaryUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: formData.toString()
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      return res.status(response.status).json({ error: errData.error?.message || 'Failed to upload to Cloudinary' });
+    }
+
+    const data = await response.json();
+    return res.json({ secure_url: data.secure_url });
+  } catch (err) {
+    console.error('[Backend Upload Proxy Error]:', err);
+    return res.status(500).json({ error: err.message || 'Internal server error during upload proxying' });
+  }
 });
 
 // 8. Order Placement Proxy
