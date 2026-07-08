@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
+import { getAuth } from 'firebase-admin/auth';
 import http, { createServer } from 'http';
 import https from 'https';
 import { Server } from 'socket.io';
@@ -17,12 +18,49 @@ const PORT = process.env.PORT || 5000;
 const SERVICE_ACCOUNT_PATH = process.env.FIREBASE_SERVICE_ACCOUNT || './firebase-service-account.json';
 
 const app = express();
-app.use(cors({ origin: '*' }));
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5000',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  'https://kwabz.com',
+  'https://admin.kwabz.com',
+  'https://seller.kwabz.com',
+  'https://kwabz-store-v2.vercel.app'
+];
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const isAllowed = allowedOrigins.includes(origin) || 
+                      origin.endsWith('.kwabz.com') || 
+                      origin.includes('vercel.app');
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const isAllowed = allowedOrigins.includes(origin) || 
+                        origin.endsWith('.kwabz.com') || 
+                        origin.includes('vercel.app');
+      if (isAllowed) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
   pingInterval: 25000,
   pingTimeout: 20000
 });
@@ -701,7 +739,116 @@ setInterval(() => {
   }
 }, 30000);
 
+// Helper to parse cookie from req.headers.cookie
+function getCookieFromRequest(req, name) {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return null;
+  const cookies = cookieHeader.split(';');
+  for (let i = 0; i < cookies.length; i++) {
+    const c = cookies[i].trim();
+    if (c.startsWith(name + '=')) {
+      return decodeURIComponent(c.substring(name.length + 1));
+    }
+  }
+  return null;
+}
+
+// Middleware to require admin authentication
+async function requireAdmin(req, res, next) {
+  // If Firebase admin is offline, bypass auth in development mock mode
+  if (!isFirebaseOnline) {
+    return next();
+  }
+
+  try {
+    // 1. Prioritize reading token from cookie
+    let token = getCookieFromRequest(req, 'kwabz_auth_token');
+    
+    // 2. Fall back to Authorization header
+    if (!token && req.headers.authorization) {
+      const parts = req.headers.authorization.split(' ');
+      if (parts.length === 2 && parts[0] === 'Bearer') {
+        token = parts[1];
+      }
+    }
+
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized: No token provided' });
+    }
+
+    // Verify token
+    const decodedToken = await getAuth().verifyIdToken(token);
+    
+    // Check if user is admin
+    const userDoc = await db.collection('users').doc(decodedToken.uid).get();
+    const ADMIN_EMAILS = ['admin@kwabzstore.com', 'admin@kwabz.com', 'kelvin@kwabz.com'];
+    const isDesignatedAdmin = ADMIN_EMAILS.includes(decodedToken.email);
+    
+    if ((userDoc.exists && userDoc.data().role === 'admin') || isDesignatedAdmin) {
+      req.user = decodedToken;
+      return next();
+    }
+
+    return res.status(403).json({ error: 'Forbidden: Admin access required' });
+  } catch (err) {
+    console.error('Auth verification failed:', err.message);
+    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+  }
+}
+
 // ─── REST API Routes ──────────────────────────────────────────
+
+// Endpoint to set HttpOnly session cookie
+app.post('/api/auth/set-session', (req, res) => {
+  const { token } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: 'Token is required' });
+  }
+
+  // Determine domain
+  let domain = null;
+  const host = req.get('host') || '';
+  if (host.includes('kwabz.com')) {
+    domain = '.kwabz.com';
+  }
+
+  const cookieOptions = {
+    httpOnly: true,
+    secure: req.secure || !host.includes('localhost'),
+    sameSite: 'Strict',
+    maxAge: 1000 * 60 * 60 * 24 * 5 // 5 days
+  };
+  if (domain) {
+    domain = '.kwabz.com'; // Enforce dot prefix to ensure all subdomains share it
+    cookieOptions.domain = domain;
+  }
+
+  res.cookie('kwabz_auth_token', token, cookieOptions);
+  res.json({ success: true });
+});
+
+// Endpoint to clear HttpOnly session cookie
+app.post('/api/auth/clear-session', (req, res) => {
+  let domain = null;
+  const host = req.get('host') || '';
+  if (host.includes('kwabz.com')) {
+    domain = '.kwabz.com';
+  }
+
+  const cookieOptions = {
+    httpOnly: true,
+    secure: req.secure || !host.includes('localhost'),
+    sameSite: 'Strict',
+    maxAge: 0
+  };
+  if (domain) {
+    domain = '.kwabz.com'; // Enforce dot prefix
+    cookieOptions.domain = domain;
+  }
+
+  res.cookie('kwabz_auth_token', '', cookieOptions);
+  res.json({ success: true });
+});
 
 // 0. Professional Status Landing Page
 app.get('/', (req, res) => {
@@ -863,7 +1010,7 @@ app.get('/api/visitor-count', (req, res) => {
 });
 
 // 7.5. Get Detailed Active Visitors
-app.get('/api/visitors/detailed', (req, res) => {
+app.get('/api/visitors/detailed', requireAdmin, (req, res) => {
   const visitors = Array.from(activeVisitors.entries()).map(([vid, data]) => ({
     visitorId: vid,
     ...data
@@ -895,7 +1042,7 @@ app.post('/api/orders', async (req, res) => {
 });
 
 // 9. Admin Fetch Orders (Capped to 100 to prevent read explosion!)
-app.get('/api/orders', async (req, res) => {
+app.get('/api/orders', requireAdmin, async (req, res) => {
   if (!isFirebaseOnline || !db) {
     return res.status(503).json({ error: 'Database service is unavailable' });
   }
