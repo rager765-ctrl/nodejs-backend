@@ -1034,17 +1034,15 @@ app.post('/api/upload', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters: file, uploadPreset, cloudName' });
     }
 
-    const formData = new URLSearchParams();
+    const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', uploadPreset);
+    formData.append('filename_override', `upload_${Date.now()}.jpg`);
 
     const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
     const response = await fetch(cloudinaryUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: formData.toString()
+      body: formData
     });
 
     if (!response.ok) {
