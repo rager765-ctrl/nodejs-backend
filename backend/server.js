@@ -21,22 +21,32 @@ const app = express();
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5000',
+  'http://localhost:8080',
   'http://localhost:5500',
+  'http://127.0.0.1:8080',
   'http://127.0.0.1:5500',
   'https://kwabz.com',
   'https://admin.kwabz.com',
   'https://seller.kwabz.com',
   'https://kwabz-store-v2.vercel.app'
 ];
+
+function isOriginAllowed(origin) {
+  if (!origin || origin === 'null') return true;
+  if (allowedOrigins.includes(origin)) return true;
+  const originClean = origin.replace(/^https?:\/\//, '');
+  if (originClean === 'kwabz.com' || originClean.endsWith('.kwabz.com')) return true;
+  if (originClean.includes('vercel.app')) return true;
+  if (/^(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(originClean)) return true;
+  return false;
+}
+
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    const isAllowed = allowedOrigins.includes(origin) || 
-                      origin.endsWith('.kwabz.com') || 
-                      origin.includes('vercel.app');
-    if (isAllowed) {
+    if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
+      console.warn(`[CORS Blocked] Express request blocked. Origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -48,13 +58,10 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      const isAllowed = allowedOrigins.includes(origin) || 
-                        origin.endsWith('.kwabz.com') || 
-                        origin.includes('vercel.app');
-      if (isAllowed) {
+      if (isOriginAllowed(origin)) {
         callback(null, true);
       } else {
+        console.warn(`[CORS Blocked] Socket.io connection blocked. Origin: ${origin}`);
         callback(new Error('Not allowed by CORS'));
       }
     },
