@@ -78,6 +78,11 @@ const cache = {
   blogPosts: [],
   promoCodes: [],
   broadcasts: [],
+  foodCategories: [],
+  foodItems: [],
+  bundles: [],
+  feedbackConfig: [],
+  feedbackSubmissions: [],
   reviews: {} // productId -> reviews array
 };
 
@@ -117,6 +122,11 @@ const cacheKeys = {
   blogPosts: 'kwabz:blogPosts',
   promoCodes: 'kwabz:promoCodes',
   broadcasts: 'kwabz:broadcasts',
+  foodCategories: 'kwabz:foodCategories',
+  foodItems: 'kwabz:foodItems',
+  bundles: 'kwabz:bundles',
+  feedbackConfig: 'kwabz:feedbackConfig',
+  feedbackSubmissions: 'kwabz:feedbackSubmissions',
   reviews: (productId) => `kwabz:reviews:${productId}`
 };
 
@@ -130,6 +140,11 @@ async function setCacheValue(key, value, ttlSeconds = null) {
   else if (key === cacheKeys.blogPosts) cache.blogPosts = value;
   else if (key === cacheKeys.promoCodes) cache.promoCodes = value;
   else if (key === cacheKeys.broadcasts) cache.broadcasts = value;
+  else if (key === cacheKeys.foodCategories) cache.foodCategories = value;
+  else if (key === cacheKeys.foodItems) cache.foodItems = value;
+  else if (key === cacheKeys.bundles) cache.bundles = value;
+  else if (key === cacheKeys.feedbackConfig) cache.feedbackConfig = value;
+  else if (key === cacheKeys.feedbackSubmissions) cache.feedbackSubmissions = value;
   else if (key.startsWith('kwabz:reviews:')) {
     const prodId = key.replace('kwabz:reviews:', '');
     cache.reviews[prodId] = { data: value, ts: Date.now() };
@@ -180,6 +195,67 @@ function getSafeTime(val) {
   return isNaN(t) ? 0 : t;
 }
 
+// ─── FCM Push Notification Service ──────────────────────────────
+async function sendFCMPush(payload, targetRole = 'all') {
+  if (!isFirebaseOnline || !db) return;
+  try {
+    let tokensSnap;
+    if (targetRole === 'admin') {
+      // Find admin UIDs
+      const adminsSnap = await db.collection('users').where('role', '==', 'admin').get();
+      const adminUids = adminsSnap.docs.map(doc => doc.id);
+      if (adminUids.length === 0) return;
+      
+      // Get tokens for these UIDs
+      const allTokensSnap = await db.collection('fcm_tokens').get();
+      const tokens = [];
+      allTokensSnap.forEach(doc => {
+        if (adminUids.includes(doc.data().uid)) {
+          tokens.push(doc.data().token);
+        }
+      });
+      if (tokens.length === 0) return;
+      tokensSnap = tokens;
+    } else {
+      const snap = await db.collection('fcm_tokens').get();
+      tokensSnap = snap.docs.map(doc => doc.data().token).filter(Boolean);
+    }
+
+    const tokens = tokensSnap;
+    if (!tokens || tokens.length === 0) return;
+
+    const messaging = getMessaging();
+    for (let i = 0; i < tokens.length; i += 500) {
+      const batch = tokens.slice(i, i + 500);
+      const message = {
+        ...payload,
+        tokens: batch
+      };
+      
+      // Add FCM options for high priority
+      message.android = { priority: 'high' };
+      message.webpush = {
+        headers: {
+          Urgency: 'high'
+        }
+      };
+
+      const response = await messaging.sendEachForMulticast(message);
+      console.log(`[FCM] Push sent: ${response.successCount} successful, ${response.failureCount} failed.`);
+      
+      if (response.failureCount > 0) {
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success && (resp.error.code === 'messaging/invalid-registration-token' || resp.error.code === 'messaging/registration-token-not-registered')) {
+            db.collection('fcm_tokens').doc(batch[idx]).delete().catch(()=> { });
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[FCM] Error sending push notification:', err);
+  }
+}
+
 // ─── background live-sync listeners (exactly 1 read path per server process) ───
 let unsubscribers = {
   products: null,
@@ -188,9 +264,7 @@ let unsubscribers = {
   settings: null,
   blogPosts: null,
   promoCodes: null,
-  broadcasts: null,
-  orders: null,
-  communications: null
+  broadcasts: null
 };
 
 function setupBackgroundSync() {
@@ -199,7 +273,7 @@ function setupBackgroundSync() {
     return;
   }
 
-  console.log('🔄 Setting up background Firestore Live-Sync listeners + FCM push...');
+  console.log('🔄 Setting up background Firestore Live-Sync listeners...');
 
   // 1. Live Products Listener
   unsubscribers.products = db.collection('products')
@@ -237,123 +311,34 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] Sellers snapshot failed:', err.message);
     });
 
-  // 3.5. Live Orders Listener — Admin Dashboard cache + FCM push on status change
-  const _orderStatusCache = new Map(); // orderId -> last known status
-  let _ordersInitialLoad = true;
-
+  // 3.5. Live Orders Listener (for Admin Dashboard)
+  let isInitialOrders = true;
   unsubscribers.orders = db.collection('orders')
     .orderBy('created_at', 'desc')
     .limit(200)
     .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] orders collection updated. Syncing ${snapshot.size} items.`);
       const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       await setCacheValue(cacheKeys.orders, orders);
       io.emit('orders_changed', cache.orders);
 
-      // Skip pushing on initial load — only push on actual mutations
-      if (_ordersInitialLoad) {
-        _ordersInitialLoad = false;
-        // Seed the status cache from the initial snapshot
-        snapshot.docs.forEach(doc => {
-          _orderStatusCache.set(doc.id, doc.data().status);
-        });
+      if (isInitialOrders) {
+        isInitialOrders = false;
         return;
       }
 
-      // Detect status changes on modified docs and push to the customer
-      for (const change of snapshot.docChanges()) {
-        if (change.type !== 'modified') continue;
-
-        const orderId  = change.doc.id;
-        const data     = change.doc.data();
-        const newStatus = data.status || 'pending';
-        const oldStatus = _orderStatusCache.get(orderId);
-
-        // Update cache
-        _orderStatusCache.set(orderId, newStatus);
-
-        // Only push if status actually changed
-        if (oldStatus === newStatus) continue;
-
-        const customerUid = data.customer_uid;
-        const orderLabel  = data.order_label || data.order_number || orderId.slice(-6).toUpperCase();
-        const customerName = data.customer?.name || 'Customer';
-
-        console.log(`[FCM] Order ${orderLabel} status: ${oldStatus} → ${newStatus} (uid: ${customerUid || 'guest'})`);
-
-        // Guest orders have no uid — nothing to push to
-        if (!customerUid || customerUid === 'guest') continue;
-
-        // Find all FCM tokens for this specific user
-        let tokens = [];
-        try {
-          const snap = await db.collection('fcm_tokens')
-            .where('uid', '==', customerUid)
-            .get();
-          tokens = snap.docs
-            .map(d => d.data().token || d.id)
-            .filter(t => typeof t === 'string' && t.length > 0);
-        } catch (e) {
-          console.warn(`[FCM] Could not fetch tokens for uid ${customerUid}:`, e.message);
-        }
-
-        if (tokens.length === 0) continue;
-
-        // Status-specific messaging
-        const STATUS_LABELS = {
-          confirmed:  { emoji: '✅', msg: `Your order ${orderLabel} has been confirmed!` },
-          shipped:    { emoji: '🚚', msg: `Your order ${orderLabel} is on its way!` },
-          delivered:  { emoji: '🎉', msg: `Your order ${orderLabel} has been delivered. Enjoy!` },
-          cancelled:  { emoji: '❌', msg: `Your order ${orderLabel} was cancelled. Contact us for details.` },
-          processing: { emoji: '⚙️', msg: `Your order ${orderLabel} is being processed.` },
-          pending:    { emoji: '⏳', msg: `Your order ${orderLabel} is pending confirmation.` },
-        };
-        const label = STATUS_LABELS[newStatus] || { emoji: '📦', msg: `Order ${orderLabel} status updated to ${newStatus}.` };
-        const receiptUrl = `https://kwabz-store-v2.vercel.app/receipt.html?id=${orderId}`;
-
-        const push = {
-          notification: {
-            title: `${label.emoji} Order Update — Kwabz Store`,
-            body: label.msg
-          },
-          data: { order_id: orderId, url: receiptUrl },
-          android: { priority: 'high' },
-          apns: {
-            headers: {
-              'apns-priority': '10',
-              'apns-push-type': 'alert'
-            }
-          },
-          webpush: {
-            headers: {
-              Urgency: 'high'
-            },
-            fcmOptions: { link: receiptUrl },
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const order = change.doc.data();
+          sendFCMPush({
             notification: {
-              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
-              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png'
-            }
-          },
-          tokens
-        };
-
-        try {
-          const messaging = getMessaging();
-          const resp = await messaging.sendEachForMulticast(push);
-          console.log(`[FCM] Order push to ${customerName}: ${resp.successCount} ok, ${resp.failureCount} failed.`);
-
-          // Cleanup stale tokens
-          resp.responses.forEach((r, i) => {
-            if (!r.success) {
-              const code = r.error?.code || '';
-              if (code.includes('not-registered') || code.includes('invalid-registration-token')) {
-                db.collection('fcm_tokens').doc(tokens[i]).delete().catch(() => {});
-              }
-            }
-          });
-        } catch (e) {
-          console.error('[FCM] Order status push failed:', e.message);
+              title: '🔔 New Order Received!',
+              body: `Order #${order.order_id || change.doc.id} for GH₵ ${Number(order.total_amount).toFixed(2)}`,
+            },
+            data: { url: '/admin-orders.html' }
+          }, 'admin');
         }
-      }
+      });
     }, err => {
       console.error('[Firestore Sync] Orders snapshot failed:', err.message);
     });
@@ -382,292 +367,70 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] Promo codes snapshot failed:', err.message);
     });
 
-  // 7. Live Broadcasts Listener — cache sync + FCM push to all users on new broadcast
-  let _broadcastsInitialLoad = true;
-
+  // 7. Live Broadcasts Listener
+  let isInitialBroadcasts = true;
   unsubscribers.broadcasts = db.collection('broadcasts')
     .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] broadcasts collection updated. Syncing ${snapshot.size} items.`);
       const broadcasts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       broadcasts.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
       await setCacheValue(cacheKeys.broadcasts, broadcasts);
       io.emit('broadcasts_changed', cache.broadcasts);
 
-      if (_broadcastsInitialLoad) { _broadcastsInitialLoad = false; return; }
-
-      // Push to all users when a new broadcast is added by admin
-      for (const change of snapshot.docChanges()) {
-        if (change.type !== 'added') continue;
-
-        const bd = change.doc.data();
-        // Skip if already pushed
-        if (bd.fcm_sent) continue;
-
-        console.log(`[FCM] New broadcast: "${bd.title || 'Announcement'}". Pushing to all devices...`);
-
-        try {
-          // Mark as pushed first to prevent duplicate sends
-          await db.collection('broadcasts').doc(change.doc.id).update({ fcm_sent: true });
-        } catch (_) {}
-
-        let tokens = [];
-        try {
-          const snap = await db.collection('fcm_tokens').get();
-          tokens = snap.docs.map(d => d.data().token || d.id).filter(t => t && t.length > 0);
-        } catch (e) {
-          console.warn('[FCM] Could not fetch tokens for broadcast:', e.message);
-        }
-
-        if (tokens.length === 0) continue;
-
-        const push = {
-          notification: {
-            title: `📢 ${bd.title || 'Kwabz Store Update'}`,
-            body: bd.message || bd.body || 'Tap to view the latest announcement.'
-          },
-          data: { url: 'https://kwabz-store-v2.vercel.app/shop.html' },
-          android: { priority: 'high' },
-          apns: {
-            headers: {
-              'apns-priority': '10',
-              'apns-push-type': 'alert'
-            }
-          },
-          webpush: {
-            headers: {
-              Urgency: 'high'
-            },
-            fcmOptions: { link: 'https://kwabz-store-v2.vercel.app/shop.html' },
-            notification: {
-              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
-              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png'
-            }
-          },
-          tokens
-        };
-
-        try {
-          const messaging = getMessaging();
-          const resp = await messaging.sendEachForMulticast(push);
-          console.log(`[FCM] Broadcast push: ${resp.successCount} ok, ${resp.failureCount} failed.`);
-        } catch (e) {
-          console.error('[FCM] Broadcast push failed:', e.message);
-        }
+      if (isInitialBroadcasts) {
+        isInitialBroadcasts = false;
+        return;
       }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const broadcast = change.doc.data();
+          sendFCMPush({
+            notification: {
+              title: '📢 Announcement from Kwabz Store!',
+              body: broadcast.message || 'Check out our latest update.',
+              image: broadcast.image_url || ''
+            },
+            data: { url: '/account.html?tab=announcements' }
+          }, 'all');
+        }
+      });
     }, err => {
       console.error('[Firestore Sync] Broadcasts snapshot failed:', err.message);
     });
 
-  // 7.5. Communications listener — push to user when admin sends a chat reply
-  let _commsInitialLoad = true;
-
-  unsubscribers.communications = db.collection('communications')
-    .where('type', '==', 'chat')
-    .where('sender_id', '==', 'admin')
-    .onSnapshot(async snapshot => {
-      if (_commsInitialLoad) { _commsInitialLoad = false; return; }
-
-      for (const change of snapshot.docChanges()) {
-        if (change.type !== 'added') continue;
-
-        const msg = change.doc.data();
-        // conversation_id is the customer's uid (set by shell.js)
-        const customerUid = msg.receiver_id || msg.conversation_id;
-        if (!customerUid || customerUid === 'admin') continue;
-
-        console.log(`[FCM] Admin replied to chat session ${customerUid}. Sending push...`);
-
-        let tokens = [];
-        try {
-          const snap = await db.collection('fcm_tokens')
-            .where('uid', '==', customerUid)
-            .get();
-          tokens = snap.docs.map(d => d.data().token || d.id).filter(t => t && t.length > 0);
-        } catch (e) {
-          console.warn('[FCM] Could not fetch tokens for chat push:', e.message);
-        }
-
-        if (tokens.length === 0) continue;
-
-        const senderName = msg.sender_name || 'Kwabz Support';
-        const chatText   = msg.message || '...';
-
-        const push = {
-          notification: {
-            title: `💬 ${senderName}`,
-            body: chatText.length > 80 ? chatText.slice(0, 77) + '...' : chatText
-          },
-          data: { url: 'https://kwabz-store-v2.vercel.app/account.html' },
-          android: { priority: 'high' },
-          apns: {
-            headers: {
-              'apns-priority': '10',
-              'apns-push-type': 'alert'
-            }
-          },
-          webpush: {
-            headers: {
-              Urgency: 'high'
-            },
-            fcmOptions: { link: 'https://kwabz-store-v2.vercel.app/account.html' },
-            notification: {
-              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
-              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png',
-              tag: `kwabz-chat-${customerUid}`,
-              renotify: true
-            }
-          },
-          tokens
-        };
-
-        try {
-          const messaging = getMessaging();
-          const resp = await messaging.sendEachForMulticast(push);
-          console.log(`[FCM] Chat push sent: ${resp.successCount} ok, ${resp.failureCount} failed.`);
-
-          // Cleanup stale tokens
-          resp.responses.forEach((r, i) => {
-            if (!r.success) {
-              const code = r.error?.code || '';
-              if (code.includes('not-registered') || code.includes('invalid-registration-token')) {
-                db.collection('fcm_tokens').doc(tokens[i]).delete().catch(() => {});
-              }
-            }
-          });
-        } catch (e) {
-          console.error('[FCM] Chat push failed:', e.message);
-        }
+  // Live Product Notifications Listener (for Push)
+  let isInitialProductsNotif = true;
+  unsubscribers.productNotifications = db.collection('product_notifications')
+    .orderBy('created_at', 'desc')
+    .limit(5)
+    .onSnapshot(snapshot => {
+      if (isInitialProductsNotif) {
+        isInitialProductsNotif = false;
+        return;
       }
-    }, err => {
-      console.error('[Firestore Sync] Communications snapshot failed:', err.message);
-    });
-
-  // 8. product_notifications listener → FCM multicast fan-out
-  // Written by the client (store.js) when a new product is added.
-  // This listener reads it, fetches all user FCM tokens, and sends a push.
-  db.collection('product_notifications')
-    .where('notified', '!=', true)         // Only unprocessed docs
-    .onSnapshot(async snapshot => {
-      if (snapshot.empty) return;
-
-      for (const change of snapshot.docChanges()) {
-        if (change.type !== 'added') continue;
-
-        const notifDoc = change.doc;
-        const notifData = notifDoc.data();
-
-        console.log(`[FCM] New product notification: "${notifData.name}" (id: ${notifDoc.id})`);
-
-        // Mark as processed immediately to prevent duplicate sends on server restart
-        try {
-          await db.collection('product_notifications').doc(notifDoc.id).update({ notified: true });
-        } catch (markErr) {
-          console.warn('[FCM] Could not mark notification as processed:', markErr.message);
-        }
-
-        // Fetch all FCM tokens from the dedicated fcm_tokens collection
-        // (Shell.js stores tokens here as: fcm_tokens/{token} = { token, uid, ... })
-        let tokens = [];
-        try {
-          const tokensSnap = await db.collection('fcm_tokens').get();
-
-          tokens = tokensSnap.docs
-            .map(d => d.data().token || d.id)    // doc ID is the token
-            .filter(t => typeof t === 'string' && t.trim().length > 0);
-
-          console.log(`[FCM] Found ${tokens.length} registered device token(s) to notify.`);
-        } catch (fetchErr) {
-          console.error('[FCM] Failed to fetch FCM tokens:', fetchErr.message);
-          continue;
-        }
-
-        if (tokens.length === 0) {
-          // No registered users — this is normal, not a bug. Log info-level only.
-          console.log('[FCM] No FCM tokens registered yet — skipping push for this notification.');
-          continue;
-        }
-
-        // Build the multicast FCM message
-        const productUrl = `https://kwabz-store-v2.vercel.app/product-detail.html?id=${notifData.product_id || ''}`;
-        const message = {
-          notification: {
-            title: `🛍️ New Drop: ${notifData.name || 'New Item'}`,
-            body: `Now available for GH₵ ${
-              notifData.discount > 0
-                ? ((notifData.price || 0) * (1 - notifData.discount / 100)).toFixed(2)
-                : (notifData.price || 0).toFixed(2)
-            } — Tap to view!`,
-            imageUrl: notifData.image_url || undefined
-          },
-          data: {
-            product_id: notifData.product_id || '',
-            url: productUrl
-          },
-          android: { priority: 'high' },
-          apns: {
-            headers: {
-              'apns-priority': '10',
-              'apns-push-type': 'alert'
-            }
-          },
-          webpush: {
-            headers: {
-              Urgency: 'high'
-            },
-            fcmOptions: { link: productUrl },
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          const discStr = data.discount > 0 ? ` — ${data.discount}% OFF!` : '';
+          sendFCMPush({
             notification: {
-              icon: 'https://kwabz-store-v2.vercel.app/icon-192x192.png',
-              badge: 'https://kwabz-store-v2.vercel.app/notification-badge.png'
+              title: '🛍️ New Arrival at Kwabz Store!',
+              body: `${data.name}${discStr} | GH₵ ${Number(data.price).toFixed(2)}`,
+              image: data.image_url || ''
+            },
+            data: {
+              product_id: data.product_id || '',
+              url: data.product_id ? `/product-detail.html?id=${data.product_id}` : '/shop.html'
             }
-          },
-          tokens: tokens
-        };
-
-        // Send multicast push
-        try {
-          const messaging = getMessaging();
-          const response = await messaging.sendEachForMulticast(message);
-
-          console.log(`[FCM] Push sent: ${response.successCount} success, ${response.failureCount} failed.`);
-
-          // Clean up stale/invalid tokens from Firestore
-          if (response.failureCount > 0) {
-            const staleTokens = [];
-            response.responses.forEach((resp, idx) => {
-              if (!resp.success) {
-                const errCode = resp.error?.code || '';
-                if (
-                  errCode === 'messaging/registration-token-not-registered' ||
-                  errCode === 'messaging/invalid-registration-token'
-                ) {
-                  staleTokens.push(tokens[idx]);
-                } else {
-                  console.warn(`[FCM] Token send failed (non-stale):`, resp.error?.message);
-                }
-              }
-            });
-
-            // Remove stale tokens from the fcm_tokens collection
-            if (staleTokens.length > 0) {
-              console.log(`[FCM] Removing ${staleTokens.length} stale token(s) from fcm_tokens...`);
-              const batch = db.batch();
-              staleTokens.forEach(token => {
-                batch.delete(db.collection('fcm_tokens').doc(token));
-              });
-              await batch.commit();
-              console.log('[FCM] Stale token cleanup complete.');
-            }
-          }
-        } catch (sendErr) {
-          console.error('[FCM] Multicast send failed:', sendErr.message);
+          }, 'all');
         }
-      }
+      });
     }, err => {
       console.error('[Firestore Sync] product_notifications snapshot failed:', err.message);
     });
 
-  console.log('✅ Background Firestore listeners + FCM fan-out ready.');
-
-  // Settings Document Listener (must remain last — depends on others being set up)
+  // 4. Live Settings Document Listener
   unsubscribers.settings = db.collection('settings').doc('global')
     .onSnapshot(async doc => {
       if (doc.exists) {
@@ -677,6 +440,63 @@ function setupBackgroundSync() {
       }
     }, err => {
       console.error('[Firestore Sync] Settings snapshot failed:', err.message);
+    });
+
+  // 11. Live Food Categories Listener
+  unsubscribers.foodCategories = db.collection('food_categories')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] food_categories updated. Syncing ${snapshot.size} items.`);
+      const foodCats = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      await setCacheValue(cacheKeys.foodCategories, foodCats);
+      io.emit('food_categories_changed', cache.foodCategories);
+    }, err => {
+      console.error('[Firestore Sync] Food categories snapshot failed:', err.message);
+    });
+
+  // 12. Live Food Items Listener
+  unsubscribers.foodItems = db.collection('food_items')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] food_items updated. Syncing ${snapshot.size} items.`);
+      const foods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      await setCacheValue(cacheKeys.foodItems, foods);
+      io.emit('food_items_changed', cache.foodItems);
+    }, err => {
+      console.error('[Firestore Sync] Food items snapshot failed:', err.message);
+    });
+
+  // 13. Live Bundles Listener
+  unsubscribers.bundles = db.collection('bundles')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] bundles updated. Syncing ${snapshot.size} items.`);
+      const bunds = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      bunds.sort((a, b) => (parseFloat(a.price) || 0) - (parseFloat(b.price) || 0));
+      await setCacheValue(cacheKeys.bundles, bunds);
+      io.emit('bundles_changed', cache.bundles);
+    }, err => {
+      console.error('[Firestore Sync] Bundles snapshot failed:', err.message);
+    });
+
+  // 14. Live Feedback Config Listener
+  unsubscribers.feedbackConfig = db.collection('feedback_form_config')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] feedback_form_config updated. Syncing ${snapshot.size} items.`);
+      const configs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      await setCacheValue(cacheKeys.feedbackConfig, configs);
+      io.emit('feedback_config_changed', cache.feedbackConfig);
+    }, err => {
+      console.error('[Firestore Sync] Feedback config snapshot failed:', err.message);
+    });
+
+  // 15. Live Feedback Submissions Listener
+  unsubscribers.feedbackSubmissions = db.collection('feedback_submissions')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] feedback_submissions updated. Syncing ${snapshot.size} items.`);
+      const subs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      subs.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
+      await setCacheValue(cacheKeys.feedbackSubmissions, subs);
+      io.emit('feedback_submissions_changed', cache.feedbackSubmissions);
+    }, err => {
+      console.error('[Firestore Sync] Feedback submissions snapshot failed:', err.message);
     });
 }
 
@@ -834,6 +654,16 @@ app.get('/api/settings', (req, res) => {
   res.json(Object.keys(cache.settings).length > 0 ? cache.settings : mockData.settings);
 });
 
+app.post('/api/settings', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('settings').doc('global').set(req.body, { merge: true });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 6. Visitor Heartbeat Endpoint (COMPLETELY replaces Firestore visitor database writes!)
 app.post('/api/visitors/heartbeat', (req, res) => {
   const { visitorId, uid, page, displayName } = req.body;
@@ -878,13 +708,6 @@ app.post('/api/orders', async (req, res) => {
   }
   try {
     const orderData = req.body;
-    const customerUid = orderData.customer_uid;
-    if (customerUid && orderData.order_method === 'wallet') {
-      const userDoc = await db.collection('users').doc(customerUid).get();
-      if (userDoc.exists && userDoc.data().wallet_locked === true) {
-        return res.status(403).json({ error: 'Your wallet is locked. Wallet checkout is disabled.' });
-      }
-    }
     orderData.created_at = orderData.created_at || new Date().toISOString();
     const docRef = await db.collection('orders').add(orderData);
     res.status(201).json({ id: docRef.id, ...orderData });
@@ -1034,6 +857,175 @@ app.get('/api/reviews/user/:uid', async (req, res) => {
   }
 });
 
+// ─── Food Categories Endpoints ───────────────────────────────
+app.get('/api/food-categories', (req, res) => {
+  res.json(cache.foodCategories.length > 0 ? cache.foodCategories : []);
+});
+
+app.post('/api/food-categories', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const docRef = await db.collection('food_categories').add(req.body);
+    res.json({ id: docRef.id, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/food-categories/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('food_categories').doc(req.params.id).set(req.body, { merge: true });
+    res.json({ id: req.params.id, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/food-categories/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('food_categories').doc(req.params.id).delete();
+    // Immediately evict from RAM cache so subsequent GET requests return fresh data
+    cache.foodCategories = cache.foodCategories.filter(c => c.id !== req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Food Items Endpoints ────────────────────────────────────
+app.get('/api/food-items', (req, res) => {
+  res.json(cache.foodItems.length > 0 ? cache.foodItems : []);
+});
+
+app.post('/api/food-items', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const docRef = await db.collection('food_items').add(req.body);
+    res.json({ id: docRef.id, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/food-items/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('food_items').doc(req.params.id).set(req.body, { merge: true });
+    res.json({ id: req.params.id, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/food-items/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('food_items').doc(req.params.id).delete();
+    // Immediately evict from RAM cache
+    cache.foodItems = cache.foodItems.filter(f => f.id !== req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Data Bundles Endpoints ──────────────────────────────────
+app.get('/api/bundles', (req, res) => {
+  res.json(cache.bundles.length > 0 ? cache.bundles : []);
+});
+
+app.post('/api/bundles', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const docRef = await db.collection('bundles').add(req.body);
+    res.json({ id: docRef.id, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/bundles/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('bundles').doc(req.params.id).set(req.body, { merge: true });
+    res.json({ id: req.params.id, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/bundles/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('bundles').doc(req.params.id).delete();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Feedback Config & Submissions Endpoints ─────────────────
+app.get('/api/feedback-config', (req, res) => {
+  res.json(cache.feedbackConfig.length > 0 ? cache.feedbackConfig : []);
+});
+
+app.post('/api/feedback-config', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const { id, config } = req.body;
+    await db.collection('feedback_form_config').doc(id).set(config);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/feedback-config/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('feedback_form_config').doc(req.params.id).delete();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/feedback-submissions', (req, res) => {
+  res.json(cache.feedbackSubmissions.length > 0 ? cache.feedbackSubmissions : []);
+});
+
+app.post('/api/feedback-submissions', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const docRef = await db.collection('feedback_submissions').add(req.body);
+    res.json({ id: docRef.id, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/feedback-submissions/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('feedback_submissions').doc(req.params.id).update(req.body);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/feedback-submissions/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('feedback_submissions').doc(req.params.id).delete();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── WebSocket Event Handling ─────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected to Socket.IO: ${socket.id}`);
@@ -1047,6 +1039,11 @@ io.on('connection', (socket) => {
   if (cache.sellers.length > 0) socket.emit('sellers_changed', cache.sellers);
   if (cache.orders.length > 0) socket.emit('orders_changed', cache.orders);
   if (Object.keys(cache.settings).length > 0) socket.emit('settings_changed', cache.settings);
+  if (cache.foodCategories.length > 0) socket.emit('food_categories_changed', cache.foodCategories);
+  if (cache.foodItems.length > 0) socket.emit('food_items_changed', cache.foodItems);
+  if (cache.bundles.length > 0) socket.emit('bundles_changed', cache.bundles);
+  if (cache.feedbackConfig.length > 0) socket.emit('feedback_config_changed', cache.feedbackConfig);
+  if (cache.feedbackSubmissions.length > 0) socket.emit('feedback_submissions_changed', cache.feedbackSubmissions);
 
   // Respond to client keep-alive pings (prevents Render free-tier sleep)
   socket.on('ping_keepalive', () => {
