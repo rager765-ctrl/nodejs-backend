@@ -754,6 +754,8 @@ app.delete('/api/food-categories/:id', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('food_categories').doc(req.params.id).delete();
+    // Immediately evict from RAM cache so subsequent GET requests return fresh data
+    cache.foodCategories = cache.foodCategories.filter(c => c.id !== req.params.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -789,6 +791,8 @@ app.delete('/api/food-items/:id', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('food_items').doc(req.params.id).delete();
+    // Immediately evict from RAM cache
+    cache.foodItems = cache.foodItems.filter(f => f.id !== req.params.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
