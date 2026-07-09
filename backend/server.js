@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
 import http, { createServer } from 'http';
 import https from 'https';
 import { Server } from 'socket.io';
@@ -194,6 +195,67 @@ function getSafeTime(val) {
   return isNaN(t) ? 0 : t;
 }
 
+// ─── FCM Push Notification Service ──────────────────────────────
+async function sendFCMPush(payload, targetRole = 'all') {
+  if (!isFirebaseOnline || !db) return;
+  try {
+    let tokensSnap;
+    if (targetRole === 'admin') {
+      // Find admin UIDs
+      const adminsSnap = await db.collection('users').where('role', '==', 'admin').get();
+      const adminUids = adminsSnap.docs.map(doc => doc.id);
+      if (adminUids.length === 0) return;
+      
+      // Get tokens for these UIDs
+      const allTokensSnap = await db.collection('fcm_tokens').get();
+      const tokens = [];
+      allTokensSnap.forEach(doc => {
+        if (adminUids.includes(doc.data().uid)) {
+          tokens.push(doc.data().token);
+        }
+      });
+      if (tokens.length === 0) return;
+      tokensSnap = tokens;
+    } else {
+      const snap = await db.collection('fcm_tokens').get();
+      tokensSnap = snap.docs.map(doc => doc.data().token).filter(Boolean);
+    }
+
+    const tokens = tokensSnap;
+    if (!tokens || tokens.length === 0) return;
+
+    const messaging = getMessaging();
+    for (let i = 0; i < tokens.length; i += 500) {
+      const batch = tokens.slice(i, i + 500);
+      const message = {
+        ...payload,
+        tokens: batch
+      };
+      
+      // Add FCM options for high priority
+      message.android = { priority: 'high' };
+      message.webpush = {
+        headers: {
+          Urgency: 'high'
+        }
+      };
+
+      const response = await messaging.sendEachForMulticast(message);
+      console.log(`[FCM] Push sent: ${response.successCount} successful, ${response.failureCount} failed.`);
+      
+      if (response.failureCount > 0) {
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success && (resp.error.code === 'messaging/invalid-registration-token' || resp.error.code === 'messaging/registration-token-not-registered')) {
+            db.collection('fcm_tokens').doc(batch[idx]).delete().catch(()=> { });
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[FCM] Error sending push notification:', err);
+  }
+}
+
 // ─── background live-sync listeners (exactly 1 read path per server process) ───
 let unsubscribers = {
   products: null,
@@ -250,6 +312,7 @@ function setupBackgroundSync() {
     });
 
   // 3.5. Live Orders Listener (for Admin Dashboard)
+  let isInitialOrders = true;
   unsubscribers.orders = db.collection('orders')
     .orderBy('created_at', 'desc')
     .limit(200)
@@ -258,6 +321,24 @@ function setupBackgroundSync() {
       const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       await setCacheValue(cacheKeys.orders, orders);
       io.emit('orders_changed', cache.orders);
+
+      if (isInitialOrders) {
+        isInitialOrders = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const order = change.doc.data();
+          sendFCMPush({
+            notification: {
+              title: '🔔 New Order Received!',
+              body: `Order #${order.order_id || change.doc.id} for GH₵ ${Number(order.total_amount).toFixed(2)}`,
+            },
+            data: { url: '/admin-orders.html' }
+          }, 'admin');
+        }
+      });
     }, err => {
       console.error('[Firestore Sync] Orders snapshot failed:', err.message);
     });
@@ -287,6 +368,7 @@ function setupBackgroundSync() {
     });
 
   // 7. Live Broadcasts Listener
+  let isInitialBroadcasts = true;
   unsubscribers.broadcasts = db.collection('broadcasts')
     .onSnapshot(async snapshot => {
       console.log(`[Firestore Sync] broadcasts collection updated. Syncing ${snapshot.size} items.`);
@@ -294,8 +376,58 @@ function setupBackgroundSync() {
       broadcasts.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
       await setCacheValue(cacheKeys.broadcasts, broadcasts);
       io.emit('broadcasts_changed', cache.broadcasts);
+
+      if (isInitialBroadcasts) {
+        isInitialBroadcasts = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const broadcast = change.doc.data();
+          sendFCMPush({
+            notification: {
+              title: '📢 Announcement from Kwabz Store!',
+              body: broadcast.message || 'Check out our latest update.',
+              image: broadcast.image_url || ''
+            },
+            data: { url: '/account.html?tab=announcements' }
+          }, 'all');
+        }
+      });
     }, err => {
       console.error('[Firestore Sync] Broadcasts snapshot failed:', err.message);
+    });
+
+  // Live Product Notifications Listener (for Push)
+  let isInitialProductsNotif = true;
+  unsubscribers.productNotifications = db.collection('product_notifications')
+    .orderBy('created_at', 'desc')
+    .limit(5)
+    .onSnapshot(snapshot => {
+      if (isInitialProductsNotif) {
+        isInitialProductsNotif = false;
+        return;
+      }
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          const discStr = data.discount > 0 ? ` — ${data.discount}% OFF!` : '';
+          sendFCMPush({
+            notification: {
+              title: '🛍️ New Arrival at Kwabz Store!',
+              body: `${data.name}${discStr} | GH₵ ${Number(data.price).toFixed(2)}`,
+              image: data.image_url || ''
+            },
+            data: {
+              product_id: data.product_id || '',
+              url: data.product_id ? `/product-detail.html?id=${data.product_id}` : '/shop.html'
+            }
+          }, 'all');
+        }
+      });
+    }, err => {
+      console.error('[Firestore Sync] product_notifications snapshot failed:', err.message);
     });
 
   // 4. Live Settings Document Listener
