@@ -2,15 +2,52 @@
 <html lang="en">
 
 <head>
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem('kwabz_theme_mode') || 'light';
+      if (savedTheme === 'dark') {
+        document.documentElement.classList.add('dark-mode');
+      }
+      // Synchronous theme token injection — eliminates nav flash before first paint
+      try {
+        const navBg = localStorage.getItem('kwabz_nav_bg_cache');
+        const primary = localStorage.getItem('kwabz_primary_cache');
+        const font = localStorage.getItem('kwabz_font_cache');
+        const parts = [];
+        if (navBg) {
+          parts.push('.top-app-bar{background-color:' + navBg + '!important}');
+          parts.push('.bottom-nav{background-color:' + navBg + '!important}');
+          parts.push('.bottom-nav-admin{background-color:' + navBg + '!important}');
+        }
+        if (primary) parts.push(':root{--primary:' + primary + '}');
+        if (font) parts.push(':root{--font-headline:' + font + ';--font-body:' + font + '}');
+        if (parts.length) {
+          const s = document.createElement('style');
+          s.id = 'kwabz-instant-theme';
+          s.textContent = parts.join('');
+          document.head.appendChild(s);
+        }
+      } catch (_) {}
+    })();
+  </script>
   <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
 
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Storefront Theme — Kwabz Store Admin</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&family=Inter:wght@100..900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&icon_names=account_balance_wallet,account_circle,add,add_a_photo,add_box,add_circle,add_photo_alternate,add_to_home_screen,admin_panel_settings,arrow_back,arrow_forward,article,assignment_return,auto_awesome,badge,balance,block,book,cached,calendar_today,call,campaign,cancel,category,chat,chat_bubble,check,check_circle,chevron_right,cleaning_services,clinical_notes,close,cloud,cloud_done,cloud_off,cloud_sync,cloud_upload,compress,confirmation_number,connect_without_contact,contact_support,content_copy,dark_mode,dashboard,database,delete,delete_forever,delete_sweep,description,desktop_windows,developer_board,diamond,dictionary,done,done_all,download,edit,emergency_home,error,error_outline,expand_more,explore,favorite,favorite_border,file_upload,fingerprint,forum,fullscreen,gavel,group,handshake,help,home,hub,image,image_not_supported,image_search,info,install_mobile,inventory_2,ios_share,key,keyboard_arrow_up,keyboard_double_arrow_up,language,light_mode,link,local_shipping,lock,logout,magic_button,mail,manage_accounts,map,menu,menu_book,monitoring,more_vert,motorcycle,my_location,no_encryption,notifications,notifications_active,notifications_paused,offline_bolt,open_in_new,palette,password,payments,percent,percentage,person,person_search,photo_camera,photo_library,picture_as_pdf,play_arrow,playlist_add,print,privacy_tip,progress_activity,public,qr_code_2,query_stats,radio_button_checked,radio_button_unchecked,rate_review,receipt,receipt_long,refresh,responsive_layout,reviews,rocket_launch,save,schedule,search,search_off,security,sell,send,sensors,settings_cell,settings_ethernet,settings_suggest,share,share_location,shopping_bag,shopping_cart,shopping_cart_checkout,smartphone,star,stop,store,storefront,straighten,stylus,support_agent,sync,table_view,task_alt,terminal,thumb_up,touch_app,trending_up,tune,upload,upload_file,verified,verified_user,visibility,visibility_off,volume_up,vpn_key,warning,wifi_off,workspace_premium&display=block" rel="stylesheet" />
 </head>
 
 <body>
+  <script>
+    if (localStorage.getItem('kwabz_theme_mode') === 'dark') {
+      document.body.classList.add('dark-mode');
+    }
+  </script>
 
   <!-- Top App Bar -->
   <header class="top-app-bar glass">
@@ -50,8 +87,10 @@
           style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Profile</button>
         <button onclick="switchTab('splash')" id="tabSplash"
           style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Splash</button>
-        <button onclick="switchTab('widget')" id="tabWidget"
-          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Widget</button>
+        <button onclick="switchTab('blog')" id="tabBlog"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Blog Page</button>
+        <button onclick="switchTab('events')" id="tabEvents"
+          style="flex: 1; padding: 0.75rem 1rem; border-radius: 1rem; font-weight: 700; color: var(--on-surface-variant); white-space: nowrap;">Events Page</button>
       </div>
 
       <form id="themeForm" onsubmit="event.preventDefault(); saveTheme();"
@@ -555,98 +594,108 @@
           </div>
         </div>
 
-        <!-- WIDGET CARD SETTINGS -->
-        <div id="sectionWidget" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
+
+
+        <!-- BLOG PAGE SETTINGS -->
+        <div id="sectionBlog" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
           <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
             <h3 class="font-headline"
-              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">
-              Live Widgets Board Configuration</h3>
-            
-            <p class="text-body-sm" style="color:var(--outline); margin-bottom:1.5rem; line-height:1.4;">
-              Select which real-time feed cards to display on your Live Widget Dashboard screen. Check the feeds you want active.
-            </p>
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">Blog Page Hero & Banner</h3>
 
-            <div style="display:flex; flex-direction:column; gap:1rem;">
-              <!-- Incoming Orders -->
-              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
-                <input type="checkbox" id="wCard_orders" class="widget-card-checkbox" value="orders" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
-                <div style="display:flex; flex-direction:column;">
-                  <span style="font-weight:700; font-size:0.875rem;">Incoming Active Orders</span>
-                  <span style="font-size:0.75rem; color:var(--outline);">Pending & Confirmed orders count</span>
-                </div>
-              </label>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Title (Main Headline)</label>
+              <input type="text" id="blogHeroTitle" class="minimal-input" placeholder="e.g. Kwabz Journal" />
+            </div>
 
-              <!-- Gross Revenue -->
-              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
-                <input type="checkbox" id="wCard_revenue" class="widget-card-checkbox" value="revenue" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
-                <div style="display:flex; flex-direction:column;">
-                  <span style="font-weight:700; font-size:0.875rem;">Gross Revenue</span>
-                  <span style="font-size:0.75rem; color:var(--outline);">Live gross sales total (excluding cancelled orders)</span>
-                </div>
-              </label>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Description (Subheadline)</label>
+              <textarea id="blogHeroDesc" class="minimal-input" rows="3" placeholder="Expert insights on student lifestyle..." style="resize:vertical;"></textarea>
+            </div>
 
-              <!-- Admin Commissions -->
-              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
-                <input type="checkbox" id="wCard_commission" class="widget-card-checkbox" value="commission" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
-                <div style="display:flex; flex-direction:column;">
-                  <span style="font-weight:700; font-size:0.875rem;">Admin Commissions</span>
-                  <span style="font-size:0.75rem; color:var(--outline);">Live calculated third-party seller commissions</span>
-                </div>
-              </label>
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Hero Background Image 1</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="blogHeroImage1" class="minimal-input" placeholder="Upload a banner or paste a URL..." />
+                <input type="file" id="fileBlogHero1" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'blogHeroImage1')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileBlogHero1').click()">Upload</button>
+              </div>
+            </div>
 
-              <!-- Pending Orders -->
-              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
-                <input type="checkbox" id="wCard_pending" class="widget-card-checkbox" value="pending" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
-                <div style="display:flex; flex-direction:column;">
-                  <span style="font-weight:700; font-size:0.875rem;">Pending Orders Status</span>
-                  <span style="font-size:0.75rem; color:var(--outline);">Count of orders in 'pending' status</span>
-                </div>
-              </label>
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Hero Background Image 2</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="blogHeroImage2" class="minimal-input" placeholder="Upload a banner or paste a URL..." />
+                <input type="file" id="fileBlogHero2" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'blogHeroImage2')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileBlogHero2').click()">Upload</button>
+              </div>
+            </div>
 
-              <!-- Delivered Orders -->
-              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
-                <input type="checkbox" id="wCard_delivered" class="widget-card-checkbox" value="delivered" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
-                <div style="display:flex; flex-direction:column;">
-                  <span style="font-weight:700; font-size:0.875rem;">Delivered Orders Status</span>
-                  <span style="font-size:0.75rem; color:var(--outline);">Count of orders completed & delivered</span>
-                </div>
-              </label>
+            <div class="form-group">
+              <label class="form-group__label">Hero Background Image 3</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="blogHeroImage3" class="minimal-input" placeholder="Upload a banner or paste a URL..." />
+                <input type="file" id="fileBlogHero3" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'blogHeroImage3')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileBlogHero3').click()">Upload</button>
+              </div>
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Specify image URLs or upload files to use as Blog banner background slideshow.</p>
+            </div>
+          </div>
+        </div>
 
-              <!-- Cancelled Orders -->
-              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
-                <input type="checkbox" id="wCard_cancelled" class="widget-card-checkbox" value="cancelled" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
-                <div style="display:flex; flex-direction:column;">
-                  <span style="font-weight:700; font-size:0.875rem;">Cancelled Orders Status</span>
-                  <span style="font-size:0.75rem; color:var(--outline);">Count of cancelled orders</span>
-                </div>
-              </label>
+        <!-- EVENTS PAGE SETTINGS -->
+        <div id="sectionEvents" class="theme-section" style="display: none; flex-direction: column; gap: 2rem;">
+          <div class="card card--flat" style="padding:1.5rem; background:var(--surface-container-high);">
+            <h3 class="font-headline"
+              style="margin-bottom:1.5rem; border-bottom:1px solid var(--outline-variant); padding-bottom:0.5rem;">Events Page Hero & Banner</h3>
 
-              <!-- Products Count -->
-              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
-                <input type="checkbox" id="wCard_products" class="widget-card-checkbox" value="products" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
-                <div style="display:flex; flex-direction:column;">
-                  <span style="font-weight:700; font-size:0.875rem;">Listed Products Count</span>
-                  <span style="font-size:0.75rem; color:var(--outline);">Total catalog products listed online</span>
-                </div>
-              </label>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Title (Main Headline)</label>
+              <input type="text" id="eventHeroTitle" class="minimal-input" placeholder="e.g. Live Experiences" />
+            </div>
 
-              <!-- Active Presence -->
-              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
-                <input type="checkbox" id="wCard_presence" class="widget-card-checkbox" value="presence" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
-                <div style="display:flex; flex-direction:column;">
-                  <span style="font-weight:700; font-size:0.875rem;">Online Active Admins</span>
-                  <span style="font-size:0.75rem; color:var(--outline);">Live connected admin team counts</span>
-                </div>
-              </label>
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-group__label">Hero Description (Subheadline)</label>
+              <textarea id="eventHeroDesc" class="minimal-input" rows="3" placeholder="Discover and buy tickets to the most exclusive events..." style="resize:vertical;"></textarea>
+            </div>
 
-              <!-- Daily Reads -->
-              <label style="display:flex; align-items:center; gap:1rem; background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-lg); cursor:pointer;">
-                <input type="checkbox" id="wCard_reads" class="widget-card-checkbox" value="reads" checked style="width:1.25rem; height:1.25rem; accent-color:var(--primary);" />
-                <div style="display:flex; flex-direction:column;">
-                  <span style="font-weight:700; font-size:0.875rem;">Firestore Daily Reads</span>
-                  <span style="font-size:0.75rem; color:var(--outline);">Daily Firebase billing reads counter</span>
-                </div>
-              </label>
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Hero Background Image 1</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="eventHeroImage1" class="minimal-input" placeholder="Upload a banner or paste a URL..." />
+                <input type="file" id="fileEventHero1" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'eventHeroImage1')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileEventHero1').click()">Upload</button>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:1.5rem;">
+              <label class="form-group__label">Hero Background Image 2</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="eventHeroImage2" class="minimal-input" placeholder="Upload a banner or paste a URL..." />
+                <input type="file" id="fileEventHero2" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'eventHeroImage2')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileEventHero2').click()">Upload</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-group__label">Hero Background Image 3</label>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" id="eventHeroImage3" class="minimal-input" placeholder="Upload a banner or paste a URL..." />
+                <input type="file" id="fileEventHero3" accept="image/*" style="display:none;"
+                  onchange="handleImageUpload(event, 'eventHeroImage3')" />
+                <button type="button" class="btn-secondary"
+                  onclick="document.getElementById('fileEventHero3').click()">Upload</button>
+              </div>
+              <p style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Specify image URLs or upload files to use as Events banner background slideshow.</p>
             </div>
           </div>
         </div>
@@ -732,6 +781,12 @@
         KwabzUtils.requireAdmin();
       }
       loadTheme();
+      
+      const urlParams = new URLSearchParams(window.location.search);
+      const tabParam = urlParams.get('tab');
+      if (tabParam) {
+        switchTab(tabParam.toLowerCase());
+      }
     });
 
     function getThemeData() {
@@ -740,10 +795,7 @@
         return el ? el.value : '';
       };
 
-      const widgetCards = [];
-      document.querySelectorAll('.widget-card-checkbox').forEach(cb => {
-        if (cb.checked) widgetCards.push(cb.value);
-      });
+
 
       return {
         activeField: document.activeElement ? document.activeElement.id : '',
@@ -791,14 +843,23 @@
         // Cart
         emptyCartMsg: getVal('emptyCartMsg').trim(),
         checkoutBtnText: getVal('checkoutBtnText').trim(),
-        // Profile
-        profileGreeting: getVal('profileGreeting').trim(),
-        orderHistoryTitle: getVal('orderHistoryTitle').trim(),
+        // Blog
+        blogHeroTitle: getVal('blogHeroTitle').trim(),
+        blogHeroDesc: getVal('blogHeroDesc').trim(),
+        blogHeroImage1: getVal('blogHeroImage1').trim(),
+        blogHeroImage2: getVal('blogHeroImage2').trim(),
+        blogHeroImage3: getVal('blogHeroImage3').trim(),
+        // Events
+        eventHeroTitle: getVal('eventHeroTitle').trim(),
+        eventHeroDesc: getVal('eventHeroDesc').trim(),
+        eventHeroImage1: getVal('eventHeroImage1').trim(),
+        eventHeroImage2: getVal('eventHeroImage2').trim(),
+        eventHeroImage3: getVal('eventHeroImage3').trim(),
         // Global
         primaryColor: getVal('primaryColor') || '#000000',
         fontFamily: getVal('fontFamily'),
-        heroFontSize: getVal('heroFontSize'),
-        glassOpacity: getVal('glassOpacity'),
+        heroFontSize: parseFloat(getVal('heroFontSize')) || 2.5,
+        glassOpacity: parseFloat(getVal('glassOpacity')) !== undefined && !isNaN(parseFloat(getVal('glassOpacity'))) ? parseFloat(getVal('glassOpacity')) : 0.8,
         // Splash & PWA
         splashStoreName: getVal('splashStoreName').trim(),
         splashBgImage: getVal('splashBgImage').trim(),
@@ -809,8 +870,13 @@
         authSignupImage: getVal('authSignupImage').trim(),
         storeWhatsapp: getVal('storeWhatsapp').trim(),
         paymentInstructions: getVal('paymentInstructions').trim(),
-        // Widgets
-        widgetCards: widgetCards
+        // Blog
+        blogHeroTitle: getVal('blogHeroTitle').trim(),
+        blogHeroDesc: getVal('blogHeroDesc').trim(),
+        blogHeroImage1: getVal('blogHeroImage1').trim(),
+        blogHeroImage2: getVal('blogHeroImage2').trim(),
+        blogHeroImage3: getVal('blogHeroImage3').trim(),
+
       };
     }
 
@@ -821,8 +887,8 @@
       const section = document.getElementById(sectionId);
       if (section) section.style.display = 'flex';
 
-      // Toggle Button Styles
-      ['Home', 'Shop', 'Product', 'Cart', 'Checkout', 'Profile', 'Splash', 'Widget'].forEach(t => {
+       // Toggle Button Styles
+      ['Home', 'Shop', 'Product', 'Cart', 'Checkout', 'Profile', 'Splash', 'Blog'].forEach(t => {
         const btn = document.getElementById('tab' + t);
         if (!btn) return;
         if (t.toLowerCase() === tab) {
@@ -848,7 +914,8 @@
       else if (tab === 'checkout') frame.src = 'checkout.html?preview=true';
       else if (tab === 'profile') frame.src = 'account.html?preview=true';
       else if (tab === 'splash') frame.src = 'index.html?preview=splash';
-      else if (tab === 'widget') frame.src = 'admin-widget.html?preview=true';
+
+      else if (tab === 'blog') frame.src = 'blog.html?preview=true';
     }
 
     // ─── Live Preview Support ──────────────────────────────────
@@ -909,8 +976,20 @@
       setVal('heroTag', theme.heroTag || '');
       setVal('ctaText', theme.ctaText || '');
       setVal('fontFamily', theme.fontFamily || "'Inter', sans-serif");
-      setVal('heroFontSize', theme.heroFontSize || 5);
-      setVal('glassOpacity', theme.glassOpacity || 0.8);
+      
+      const fontSize = theme.heroFontSize || 2.5;
+      setVal('heroFontSize', fontSize);
+      const fontSizeVal = document.getElementById('heroFontSizeVal');
+      if (fontSizeVal) {
+        fontSizeVal.textContent = fontSize + 'rem';
+      }
+
+      const opacity = theme.glassOpacity !== undefined && theme.glassOpacity !== null ? theme.glassOpacity : 0.8;
+      setVal('glassOpacity', opacity);
+      const opacityVal = document.getElementById('glassOpacityVal');
+      if (opacityVal) {
+        opacityVal.textContent = Math.round(opacity * 100) + '%';
+      }
       setVal('heroImage1', theme.heroImage1 || '');
       setVal('heroImage2', theme.heroImage2 || '');
       setVal('heroImage3', theme.heroImage3 || '');
@@ -944,6 +1023,13 @@
       setVal('sellersDesc', theme.sellersDesc || '');
       setVal('sellersBgImage', theme.sellersBgImage || '');
 
+      // Blog
+      setVal('blogHeroTitle', theme.blogHeroTitle || '');
+      setVal('blogHeroDesc', theme.blogHeroDesc || '');
+      setVal('blogHeroImage1', theme.blogHeroImage1 || '');
+      setVal('blogHeroImage2', theme.blogHeroImage2 || '');
+      setVal('blogHeroImage3', theme.blogHeroImage3 || '');
+
       // Product
       setVal('buyBtnText', theme.buyBtnText || '');
       setVal('preOrderBtnText', theme.preOrderBtnText || '');
@@ -968,11 +1054,7 @@
       setVal('authSignupImage', theme.authSignupImage || '');
       setVal('storeWhatsapp', theme.storeWhatsapp || '233553866329');
 
-      // Widget Card checkboxes
-      const widgetCards = theme.widgetCards || ['orders', 'revenue', 'commission', 'pending', 'delivered', 'cancelled', 'products', 'presence', 'reads'];
-      document.querySelectorAll('.widget-card-checkbox').forEach(cb => {
-        cb.checked = widgetCards.includes(cb.value);
-      });
+
 
       updatePreview();
     }
@@ -1053,6 +1135,22 @@
         KwabzUtils.toast('Applying theme to live store...', 'info');
 
         const themeData = getThemeData();
+
+        // Upload any base64 images to Cloudinary
+        for (const key of Object.keys(themeData)) {
+          if (typeof themeData[key] === 'string' && themeData[key].startsWith('data:image/')) {
+            try {
+              btn.textContent = `Uploading image...`;
+              themeData[key] = await KwabzUtils.uploadToCloudinary(themeData[key]);
+              const el = document.getElementById(key);
+              if (el) el.value = themeData[key];
+            } catch (uploadErr) {
+              console.error(`[Theme] Failed to upload ${key} to Cloudinary:`, uploadErr);
+              KwabzUtils.toast(`Failed to upload image to Cloudinary.`, 'warning');
+            }
+          }
+        }
+
         themeData.appVersion = 'v_' + Date.now();
 
         await KwabzStore.updateSettings({ theme: themeData });

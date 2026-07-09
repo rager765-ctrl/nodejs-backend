@@ -2,6 +2,34 @@
 <html lang="en">
 
 <head>
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem('kwabz_theme_mode') || 'light';
+      if (savedTheme === 'dark') {
+        document.documentElement.classList.add('dark-mode');
+      }
+      // Synchronous theme token injection — eliminates nav flash before first paint
+      try {
+        const navBg = localStorage.getItem('kwabz_nav_bg_cache');
+        const primary = localStorage.getItem('kwabz_primary_cache');
+        const font = localStorage.getItem('kwabz_font_cache');
+        const parts = [];
+        if (navBg) {
+          parts.push('.top-app-bar{background-color:' + navBg + '!important}');
+          parts.push('.bottom-nav{background-color:' + navBg + '!important}');
+          parts.push('.bottom-nav-admin{background-color:' + navBg + '!important}');
+        }
+        if (primary) parts.push(':root{--primary:' + primary + '}');
+        if (font) parts.push(':root{--font-headline:' + font + ';--font-body:' + font + '}');
+        if (parts.length) {
+          const s = document.createElement('style');
+          s.id = 'kwabz-instant-theme';
+          s.textContent = parts.join('');
+          document.head.appendChild(s);
+        }
+      } catch (_) {}
+    })();
+  </script>
   <meta charset="utf-8" />
   <meta name="viewport"
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -34,8 +62,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&family=Inter:wght@100..900&display=swap"
     rel="stylesheet" />
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
-    rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet" />
   <meta name="theme-color" content="#FFFFFF" />
   <link rel="stylesheet" href="styles.css" />
 
@@ -67,13 +94,13 @@
       justify-content: flex-end;
       padding: 3rem 1.5rem;
       color: white;
-      overflow: hidden;
+      overflow: hidden; z-index: 1;
     }
 
     .landing-hero__image {
       position: absolute;
       inset: 0;
-      z-index: -1;
+      z-index: -2;
     }
 
     .landing-hero__image img {
@@ -97,12 +124,12 @@
       position: absolute;
       inset: 0;
       background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.3) 50%, rgba(0, 0, 0, 0.1) 100%);
-      z-index: 0;
+      z-index: -1;
     }
 
     .landing-hero__content {
       position: relative;
-      z-index: 10;
+      z-index: 1;
       max-width: 40rem;
       opacity: 0;
       transform: translateY(20px);
@@ -186,7 +213,7 @@
       align-items: center;
       gap: 0.5rem;
       opacity: 0.6;
-      animation: bounce 2s infinite;
+      animation: bounce 2s infinite; z-index: 1;
     }
 
     @keyframes heroZoom {
@@ -271,6 +298,14 @@
 </head>
 
 <body>
+  <script>
+    if (localStorage.getItem('kwabz_theme_mode') === 'dark') {
+      document.body.classList.add('dark-mode');
+    }
+  </script>
+
+
+
 
 
 
@@ -278,7 +313,26 @@
   <header class="top-app-bar" style="background:transparent; border-bottom:none;">
     <div style="display:flex;align-items:center;gap:1rem;">
       <span class="top-app-bar__title font-headline"
-        style="color:white; font-weight:900; letter-spacing:-0.05em; font-size:1.25rem;">Kwabz Store</span>
+        style="color:white; font-weight:900; letter-spacing:-0.05em; font-size:1.25rem;">
+        <script>
+          (function () {
+            try {
+              const cached = JSON.parse(localStorage.getItem('kwabz_settings') || '{}');
+              const theme = cached.theme || {};
+              const logoType = theme.logoType || 'text';
+              const logoText = theme.logoText || 'Kwabz Store';
+              const logoImageUrl = theme.logoImageUrl || '';
+              if (logoType === 'image' && logoImageUrl) {
+                document.write('<img src="' + logoImageUrl + '" alt="' + logoText + '" style="max-height: 2.2rem; max-width: 160px; object-fit: contain; vertical-align: middle; display: block;" />');
+              } else {
+                document.write(logoText);
+              }
+            } catch (e) {
+              document.write('Kwabz Store');
+            }
+          })();
+        </script>
+      </span>
     </div>
     <div class="top-app-bar__actions">
       <button class="icon-btn" style="color:white;" onclick="NotificationFeed.openModal()">
@@ -298,21 +352,16 @@
             try {
               const cached = JSON.parse(localStorage.getItem('kwabz_settings') || '{}');
               const theme = cached.theme || {};
-              const img1 = theme.heroImage1 || '';
-              const img2 = theme.heroImage2 || '';
-              const img3 = theme.heroImage3 || '';
-
-              const default1 = 'https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&q=80&w=1200';
-              const default2 = 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&q=80&w=1200';
-              const default3 = 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&q=80&w=1200';
-
-              document.write('<img class="active" src="' + (img1 || default1) + '" alt="Hero Image 1" loading="eager" />');
-              document.write('<img src="' + (img2 || default2) + '" alt="Hero Image 2" loading="lazy" />');
-              document.write('<img src="' + (img3 || default3) + '" alt="Hero Image 3" loading="lazy" />');
+              const img1 = (theme.heroImage1 || '').trim();
+              const img2 = (theme.heroImage2 || '').trim();
+              const img3 = (theme.heroImage3 || '').trim();
+              document.write('<img' + (img1 ? ' class="active"' : '') + ' src="' + img1 + '" alt="Hero Image 1" loading="eager" />');
+              document.write('<img src="' + img2 + '" alt="Hero Image 2" loading="lazy" />');
+              document.write('<img src="' + img3 + '" alt="Hero Image 3" loading="lazy" />');
             } catch (e) {
-              document.write('<img class="active" src="https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&q=80&w=1200" alt="Hero Image 1" loading="eager" />');
-              document.write('<img src="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&q=80&w=1200" alt="Hero Image 2" loading="lazy" />');
-              document.write('<img src="https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&q=80&w=1200" alt="Hero Image 3" loading="lazy" />');
+              document.write('<img alt="Hero Image 1" loading="eager" />');
+              document.write('<img alt="Hero Image 2" loading="lazy" />');
+              document.write('<img alt="Hero Image 3" loading="lazy" />');
             }
           })();
         </script>
@@ -371,6 +420,11 @@
                 }
               })();
             </script>
+          </a>
+          <a href="food-hub.html" class="btn-landing btn-landing--outline glass"
+            style="text-decoration:none; display:inline-flex; align-items:center; gap:0.5rem; border:1px solid rgba(255,255,255,0.3); color:white; background:rgba(225,29,72,0.25);">
+            <span class="material-symbols-outlined" style="font-size:1.25rem;">restaurant</span>
+            Kwabz Eat
           </a>
           <button id="hero-install-btn" class="btn-landing btn-landing--outline glass"
             style="text-decoration:none; display:inline-flex; align-items:center; gap:0.5rem; border:1px solid rgba(255,255,255,0.3); color:white; background:rgba(255,255,255,0.1);">
@@ -435,6 +489,25 @@
       </div>
     </section>
 
+    <!-- Editorial Banner -->
+    <section style="margin-top:5rem;">
+      <div
+        style="background:var(--surface-container-low);border-radius:var(--radius-2xl);padding:2.5rem;display:flex;flex-direction:column;align-items:center;text-align:center;">
+        <span class="text-label-sm" style="color:var(--outline);letter-spacing:0.2em;margin-bottom:1rem;">The
+          Journal</span>
+        <h3 class="font-headline" style="font-size:1.875rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:1rem;">
+          Semester Picks '26</h3>
+        <p class="text-body-md"
+          style="color:var(--on-surface-variant);max-width:20rem;margin-bottom:2rem;line-height:1.6;">
+          Equip yourself for the journey. Discover the gear that defines the smart student life.
+        </p>
+        <button class="btn-primary" onclick="window.location.href='blog.html'"
+          style="width:auto;padding:0.875rem 2rem;font-size:0.75rem;letter-spacing:0.1em;text-transform:uppercase;">
+          Read More
+        </button>
+      </div>
+    </section>
+
     <footer
       style="padding:4rem 1.5rem; text-align:center; border-top:1px solid var(--outline-variant); margin-bottom: 5rem;">
       <h3 class="font-headline" style="margin-bottom:1rem;">Kwabz Store Online</h3>
@@ -495,109 +568,127 @@
         style="display:none; position:absolute; top:0.125rem; right:0.5rem;">0</span>
     </a>
     <a id="authNavLink" href="login.html" class="bottom-nav__item">
-      <span class="material-symbols-outlined">person</span>
+      <span class="material-symbols-outlined" id="authNavIcon">person</span>
       <span id="authNavText">Sign In</span>
     </a>
+    <script>
+      (function() {
+        try {
+          const cached = localStorage.getItem('kwabz_auth_cache');
+          if (cached) {
+            document.getElementById('authNavLink').href = 'account.html';
+            document.getElementById('authNavText').textContent = 'Account';
+            const icon = document.getElementById('authNavIcon');
+            if (icon) icon.classList.add('filled');
+          }
+          const cartData = localStorage.getItem('kwabz_cart');
+          if (cartData) {
+            const items = JSON.parse(cartData);
+            if (Array.isArray(items) && items.length > 0) {
+              const count = items.reduce((acc, item) => acc + (item.quantity || 1), 0);
+              if (count > 0) {
+                const badges = document.querySelectorAll('[data-cart-badge]');
+                badges.forEach(b => {
+                  b.textContent = count;
+                  b.style.display = 'flex';
+                });
+              }
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
   </nav>
 
-  <!-- ═══ Scripts (Modular Web Engine) ═══ -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <script src="store.js?v=2.4.9"></script>
-  <script src="utils.js?v=2.4.9"></script>
+  <script src="store.js"></script>
+  <script src="utils.js"></script>
   <script src="app.js" defer></script>
-  <script type="module" src="shell.js?v=2.4.9"></script>
+  <script type="module" src="shell.js"></script>
   <script>
-    window.addEventListener('DOMContentLoaded', () => {
-      startHeroSlider();
-    });
+    window.addEventListener('DOMContentLoaded', () => { startHeroSlider(); });
 
-    // ─── Hero Slider ──────────────────────────────────────────
     function startHeroSlider() {
       const container = document.getElementById('heroImages');
       if (!container) return;
-      const imgs = container.getElementsByTagName('img');
-      let current = 0;
-
+      const imgs = Array.from(container.getElementsByTagName('img'));
+      if (!imgs.length) return;
+      const hasActive = imgs.some(img => img.classList.contains('active'));
+      if (!hasActive) {
+        const firstValid = imgs.find(img => img.src && !img.src.endsWith(window.location.href));
+        if (firstValid) firstValid.classList.add('active');
+      }
+      let current = imgs.findIndex(img => img.classList.contains('active'));
+      if (current < 0) current = 0;
+      if (imgs.length < 2) return;
       setInterval(() => {
-        if (imgs.length < 2) return;
         imgs[current].classList.remove('active');
         current = (current + 1) % imgs.length;
+        let tries = 0;
+        while (!imgs[current].src && tries < imgs.length) { current = (current + 1) % imgs.length; tries++; }
         imgs[current].classList.add('active');
       }, 7000);
     }
 
-    // startHeroSlider() now called in DOMContentLoaded above
-
     let lastRenderedPicksJson = '';
 
-    // ─── Live UI Updator (Real-Time Admin Sync) ───
     function applyIndexTheme(theme) {
       if (!theme) return;
-      console.log('[Index] Applying live theme:', theme);
-
       const titleEl = document.querySelector('.landing-hero__title');
       if (titleEl && theme.heroTitle) titleEl.textContent = theme.heroTitle;
-
       const descEl = document.querySelector('.landing-hero__description');
       if (descEl && theme.heroDesc) descEl.textContent = theme.heroDesc;
-
       const tagEl = document.querySelector('.landing-hero__tag');
       if (tagEl && theme.heroTag) tagEl.textContent = theme.heroTag;
-
       const ctaEl = document.querySelector('.btn-landing--primary');
       if (ctaEl && theme.ctaText) ctaEl.textContent = theme.ctaText;
 
       const heroContainer = document.getElementById('heroImages');
       if (heroContainer) {
-        const imgs = heroContainer.getElementsByTagName('img');
-        if (imgs.length >= 3) {
-          // CHANGE-ONLY OVERWRITE ENGINE: Direct assignment ONLY when image actually changes, completely avoiding blinks/reloads
-          if (theme.heroImage1 && theme.heroImage1.trim() !== '' && imgs[0].getAttribute('src') !== theme.heroImage1) {
-            imgs[0].src = theme.heroImage1;
-            imgs[0].style.display = 'block';
-          }
-          if (theme.heroImage2 && theme.heroImage2.trim() !== '' && imgs[1].getAttribute('src') !== theme.heroImage2) {
-            imgs[1].src = theme.heroImage2;
-            imgs[1].style.display = 'block';
-          }
-          if (theme.heroImage3 && theme.heroImage3.trim() !== '' && imgs[2].getAttribute('src') !== theme.heroImage3) {
-            imgs[2].src = theme.heroImage3;
-            imgs[2].style.display = 'block';
+        const imgs = Array.from(heroContainer.getElementsByTagName('img'));
+        const newUrls = [theme.heroImage1, theme.heroImage2, theme.heroImage3];
+        newUrls.forEach((url, i) => {
+          if (!url || !url.trim()) return;
+          const img = imgs[i];
+          if (!img || img.getAttribute('src') === url) return;
+          const wasActive = img.classList.contains('active');
+          if (wasActive) {
+            img.classList.remove('active');
+            img.src = url;
+            img.onload = () => img.classList.add('active');
+            img.onerror = () => {};
+          } else { img.src = url; }
+        });
+        const hasActive = imgs.some(img => img.classList.contains('active'));
+        if (!hasActive) {
+          const fw = imgs.find((img, i) => (newUrls[i] || '').trim());
+          if (fw) {
+            fw.onload = () => fw.classList.add('active');
+            if (fw.complete && fw.naturalWidth > 0) fw.classList.add('active');
           }
         }
       }
 
-      // ─── Splash Screen Live Updates ───
       const splashBg = document.getElementById('splash-bg-img');
       if (splashBg && theme.splashBgImage) splashBg.style.backgroundImage = `url('${theme.splashBgImage}')`;
-
       const splashTitle = document.getElementById('splash-title');
       if (splashTitle && theme.splashStoreName) splashTitle.textContent = theme.splashStoreName;
-
       if (theme.splashLoaderColor) {
-        document.querySelectorAll('.splash-dot').forEach(dot => {
-          dot.style.background = theme.splashLoaderColor;
-        });
+        document.querySelectorAll('.splash-dot').forEach(dot => { dot.style.background = theme.splashLoaderColor; });
       }
-
-      if (typeof KwabzUtils !== 'undefined' && KwabzUtils.applyGlobalTheme) {
-        KwabzUtils.applyGlobalTheme(theme);
-      }
-
-      // Handle Broadcast Notification saving
+      if (typeof KwabzUtils !== 'undefined' && KwabzUtils.applyGlobalTheme) KwabzUtils.applyGlobalTheme(theme);
       if (typeof NotificationFeed !== 'undefined') {
         if (theme.broadcastMessage && theme.broadcastMessage.trim() !== '') {
           NotificationFeed.addMessage(theme);
         } else {
-          // If deleted or empty, clear the client-side storage immediately
           NotificationFeed.saveMessages([]);
         }
       }
     }
 
-    // ─── Top Picks Renderer ───────────────────────────────────
+    // u2500u2500u2500 Top Picks Renderer u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500u2500
     function renderTopPicks(forceProducts) {
       if (typeof KwabzStore === 'undefined') return;
       const allProducts = forceProducts || KwabzStore.getAllProducts();
@@ -608,10 +699,7 @@
 
       if (mainProducts.length === 0) {
         const syncStatus = (typeof KwabzStore !== 'undefined') ? KwabzStore.getSyncStatus() : 'syncing';
-        if (syncStatus === 'syncing') {
-          // Keep the initial shimmering HTML skeletons visible during sync
-          return;
-        }
+        if (syncStatus === 'syncing') return;
         mainGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--outline);">New arrivals coming soon...</div>';
       } else {
         const settings = KwabzStore.getSettings() || { newTagDuration: 7 };
@@ -627,18 +715,13 @@
           stock: p.stock
         }))) + '_' + newThreshold;
 
-        if (currentPicksJson === lastRenderedPicksJson) {
-          return; // Skip destructive innerHTML writes if new picks are identical!
-        }
+        if (currentPicksJson === lastRenderedPicksJson) return;
         lastRenderedPicksJson = currentPicksJson;
 
         mainGrid.innerHTML = renderProductList(mainProducts);
 
-        // Force loaded state for already cached images
         mainGrid.querySelectorAll('.product-card__image').forEach(img => {
-          if (img.complete) {
-            img.classList.add('loaded');
-          }
+          if (img.complete) img.classList.add('loaded');
         });
       }
     }
@@ -657,7 +740,7 @@
         return `
           <div class="product-card" onclick="window.location.href='product-detail.html?id=${product.id}'">
             <div class="product-card__image-wrap">
-               <img class="product-card__image" src="${product.image_url}" alt="${product.name}" loading="lazy" decoding="async"
+               <img class="product-card__image" src="${(typeof KwabzUtils !== 'undefined') ? KwabzUtils.getOptimizedImageUrl(product.image_url, 400) : product.image_url}" alt="${product.name}" loading="lazy" decoding="async"
                  onload="this.classList.add('loaded')"
                  onerror="this.src='https://via.placeholder.com/400x500?text=No+Image';this.classList.add('loaded');this.style.opacity=0.5;" />
               ${product.availability === 'pre_order'
@@ -949,6 +1032,6 @@
       }
     });
   </script>
-</body>
+</body> 
 
 </html>

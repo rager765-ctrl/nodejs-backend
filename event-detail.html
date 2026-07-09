@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Event Details — Kwabz Store</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&family=Inter:wght@100..900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet" />
+  
+  <style>
+    body { background-color: var(--background); }
+    .top-app-bar {
+      background: color-mix(in srgb, var(--surface-container-lowest) 80%, transparent) !important;
+      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border-bottom: 1px solid var(--outline-variant) !important;
+    }
+    
+    .hero-image {
+      width: 100%; height: 35vh; object-fit: cover; position: relative;
+    }
+    .hero-gradient {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 50%;
+      background: linear-gradient(to top, var(--background), transparent);
+    }
+    
+    .event-container {
+      max-width: 800px; margin: 0 auto; padding: 1.5rem; margin-top: -3rem; position: relative; z-index: 10;
+    }
+
+    .ticket-tier {
+      background: var(--surface-container-lowest); border: 1px solid var(--outline-variant);
+      border-radius: var(--radius-xl); padding: 1.25rem; display: flex; justify-content: space-between;
+      align-items: center; margin-bottom: 1rem; box-shadow: var(--shadow-ambient); transition: border-color 0.2s;
+      cursor: pointer;
+    }
+    .ticket-tier.selected { border: 2px solid var(--primary); background: rgba(37,99,235,0.05); }
+    
+    .qty-btn {
+      width: 2rem; height: 2rem; border-radius: 50%; background: var(--surface-container-high);
+      display: flex; align-items: center; justify-content: center; font-weight: 800; cursor: pointer; border: none;
+    }
+
+    .checkout-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface-container-lowest);
+      padding: 1rem 1.5rem; border-top: 1px solid var(--outline-variant); box-shadow: 0 -10px 20px rgba(0,0,0,0.05);
+      display: flex; justify-content: space-between; align-items: center; z-index: 100;
+      padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+    }
+  </style>
+</head>
+<body>
+  <script>
+    if (localStorage.getItem('kwabz_theme_mode') === 'dark') document.body.classList.add('dark-mode');
+  </script>
+
+  <!-- Top App Bar -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+      <div style="display:flex;align-items:center;gap:1rem;">
+        <button class="btn-icon" onclick="history.back()">
+          <span class="material-symbols-outlined">arrow_back</span>
+        </button>
+        <span class="top-app-bar__title font-headline">Event Details</span>
+      </div>
+      <button class="btn-icon" onclick="shareEvent()">
+        <span class="material-symbols-outlined">share</span>
+      </button>
+    </div>
+  </header>
+
+  <div style="position:relative;">
+    <img id="detailImage" src="" class="hero-image" />
+    <div class="hero-gradient"></div>
+  </div>
+
+  <main class="page-content event-container" style="padding-bottom: 7rem;">
+    
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem;">
+      <div>
+        <div id="detailDateBadge" style="display:inline-block; background:var(--primary); color:white; padding:0.25rem 0.75rem; border-radius:100px; font-size:0.7rem; font-weight:800; margin-bottom:0.5rem;"></div>
+        <h1 id="detailTitle" class="font-headline text-display" style="font-size:2rem; margin-bottom:0.5rem; line-height:1.2;"></h1>
+        <p style="font-size:0.8rem; color:var(--outline); font-weight:700;">By <span id="detailOrganizer"></span></p>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin: 1.5rem 0; background:var(--surface-container-high); padding:1rem; border-radius:var(--radius-xl);">
+      <div>
+        <p style="font-size:0.7rem; color:var(--outline); margin-bottom:0.25rem;">DATE & TIME</p>
+        <p id="detailDateTime" style="font-size:0.875rem; font-weight:700; color:var(--on-surface); margin:0;"></p>
+      </div>
+      <div>
+        <p style="font-size:0.7rem; color:var(--outline); margin-bottom:0.25rem;">LOCATION</p>
+        <p id="detailLocation" style="font-size:0.875rem; font-weight:700; color:var(--on-surface); margin:0;"></p>
+      </div>
+    </div>
+
+    <div style="margin-bottom: 2rem;">
+      <h3 class="font-headline" style="font-size:1.1rem; margin-bottom:0.5rem;">About This Event</h3>
+      <p id="detailDescription" class="text-body-md" style="color:var(--outline); line-height:1.6;"></p>
+    </div>
+
+    <div>
+      <h3 class="font-headline" style="font-size:1.1rem; margin-bottom:1rem;">Select Tickets</h3>
+      <div id="ticketTiersContainer">
+        <!-- Skeleton -->
+        <div class="skeleton-card" style="height:80px; margin-bottom:1rem;"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <div class="checkout-bar" id="checkoutBar" style="display:none; gap: 1.5rem;">
+    <div style="flex-shrink: 0; display:flex; flex-direction:column; justify-content:center;">
+      <p style="font-size:0.7rem; color:var(--outline); margin:0 0 0.1rem 0; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">TOTAL (<span id="totalTicketsCount">0</span>)</p>
+      <p id="totalPriceDisplay" style="font-size:1.5rem; font-weight:900; color:var(--on-surface); margin:0; line-height:1; letter-spacing:-0.02em;">GH₵0.00</p>
+    </div>
+    <button onclick="proceedToCheckout()" class="btn-primary" style="flex: 1; padding: 1rem; font-size:1rem; border-radius:100px; margin:0; display:flex; justify-content:center; align-items:center;">
+      Buy Tickets
+    </button>
+  </div>
+
+  <!-- Firebase Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <script type="module">
+    import { firebaseConfig } from './config.js';
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const eventId = urlParams.get('id');
+
+    let ticketTiers = [];
+    let selectedTickets = {}; // { ticketId: quantity }
+
+    async function loadEventDetails() {
+      if (!eventId) {
+        alert("Event not found.");
+        window.location.href = 'events.html';
+        return;
+      }
+
+      try {
+        const doc = await db.collection('events').doc(eventId).get();
+        if (!doc.exists) throw new Error("Event not found");
+        const data = doc.data();
+
+        document.getElementById('detailImage').src = data.cover_image || 'placeholder.jpg';
+        document.getElementById('detailTitle').innerText = data.title;
+        document.getElementById('detailOrganizer').innerText = data.organizer_name;
+        document.getElementById('detailDescription').innerText = data.description;
+        document.getElementById('detailLocation').innerText = data.location;
+        
+        const d = new Date(data.date);
+        const dateStr = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+        document.getElementById('detailDateBadge').innerText = dateStr;
+        document.getElementById('detailDateTime').innerText = `${dateStr} • ${data.time}`;
+
+        loadTickets();
+      } catch(e) {
+        alert(e.message);
+        window.location.href = 'events.html';
+      }
+    }
+
+    function loadTickets() {
+      db.collection('event_tickets').where('event_id', '==', eventId)
+        .onSnapshot(snap => {
+          ticketTiers = [];
+          const container = document.getElementById('ticketTiersContainer');
+          if (snap.empty) {
+            container.innerHTML = '<p class="text-body-sm" style="color:var(--outline);">No tickets available yet.</p>';
+            return;
+          }
+
+          let html = '';
+          snap.forEach(doc => {
+            const t = { id: doc.id, ...doc.data() };
+            ticketTiers.push(t);
+            const available = t.total_quantity - (t.sold_quantity || 0);
+            
+            if (available <= 0) {
+               html += `
+                <div class="ticket-tier" style="opacity:0.5; filter:grayscale(1);">
+                  <div>
+                    <h4 style="margin:0; font-weight:800; font-size:1.1rem; color:var(--on-surface);">${t.name}</h4>
+                    <p style="margin:0; color:var(--outline); font-size:0.9rem;">GH₵${Number(t.price).toFixed(2)}</p>
+                  </div>
+                  <span style="color:var(--error); font-weight:800; font-size:0.875rem;">SOLD OUT</span>
+                </div>`;
+            } else {
+               const qty = selectedTickets[t.id] || 0;
+               html += `
+                <div class="ticket-tier ${qty > 0 ? 'selected' : ''}" id="tier-${t.id}">
+                  <div>
+                    <h4 style="margin:0; font-weight:800; font-size:1.1rem; color:var(--on-surface);">${t.name}</h4>
+                    <p style="margin:0; color:var(--primary); font-weight:700; font-size:0.9rem;">GH₵${Number(t.price).toFixed(2)}</p>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:0.75rem;">
+                    <button class="qty-btn" onclick="updateQty('${t.id}', -1)" style="color:var(--outline);">-</button>
+                    <span style="font-weight:800; width:1rem; text-align:center;">${qty}</span>
+                    <button class="qty-btn" onclick="updateQty('${t.id}', 1)" style="color:var(--primary);">+</button>
+                  </div>
+                </div>`;
+            }
+          });
+          container.innerHTML = html;
+        });
+    }
+
+    window.updateQty = (ticketId, delta) => {
+      if (!selectedTickets[ticketId]) selectedTickets[ticketId] = 0;
+      
+      const newQty = selectedTickets[ticketId] + delta;
+      
+      const tier = ticketTiers.find(t => t.id === ticketId);
+      const available = tier.total_quantity - (tier.sold_quantity || 0);
+      
+      if (newQty < 0) return;
+      if (newQty > available) {
+         alert(`Only ${available} tickets available!`);
+         return;
+      }
+      if (newQty > 10) {
+         alert(`You can only buy up to 10 tickets of this tier.`);
+         return;
+      }
+
+      selectedTickets[ticketId] = newQty;
+      
+      // Re-render UI
+      const el = document.getElementById(`tier-${ticketId}`);
+      el.querySelector('span').innerText = newQty;
+      if (newQty > 0) el.classList.add('selected');
+      else el.classList.remove('selected');
+
+      updateCheckoutBar();
+    };
+
+    function updateCheckoutBar() {
+      let totalQty = 0;
+      let totalPrice = 0;
+
+      Object.keys(selectedTickets).forEach(id => {
+        const qty = selectedTickets[id];
+        const tier = ticketTiers.find(t => t.id === id);
+        if (qty > 0 && tier) {
+          totalQty += qty;
+          totalPrice += (qty * tier.price);
+        }
+      });
+
+      document.getElementById('totalTicketsCount').innerText = totalQty;
+      document.getElementById('totalPriceDisplay').innerText = `GH₵${totalPrice.toFixed(2)}`;
+
+      const bar = document.getElementById('checkoutBar');
+      if (totalQty > 0) {
+        bar.style.display = 'flex';
+      } else {
+        bar.style.display = 'none';
+      }
+    }
+
+    window.proceedToCheckout = () => {
+       // Save to session storage and redirect to specialized event-checkout
+       const cart = [];
+       Object.keys(selectedTickets).forEach(id => {
+         const qty = selectedTickets[id];
+         const tier = ticketTiers.find(t => t.id === id);
+         if (qty > 0 && tier) {
+           cart.push({
+             ticketId: id,
+             eventId: eventId,
+             name: tier.name,
+             price: tier.price,
+             quantity: qty
+           });
+         }
+       });
+
+       sessionStorage.setItem('kwabz_event_cart', JSON.stringify(cart));
+       window.location.href = `event-checkout.html?id=${eventId}`;
+    };
+
+    window.shareEvent = () => {
+      const url = window.location.href;
+      const title = document.getElementById('detailTitle').innerText;
+      
+      if (navigator.share) {
+        navigator.share({
+          title: title,
+          text: `Get tickets for ${title} on Kwabz Store!`,
+          url: url
+        }).catch(console.error);
+      } else {
+        navigator.clipboard.writeText(url).then(() => {
+          alert('Event link copied to clipboard!');
+        });
+      }
+    };
+
+    loadEventDetails();
+  </script>
+</body>
+</html>

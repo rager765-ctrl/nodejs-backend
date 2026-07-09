@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Events — Kwabz Store</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&family=Inter:wght@100..900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet" />
+  
+  <style>
+    body { background-color: var(--background); }
+    .top-app-bar, .bottom-nav {
+      background: color-mix(in srgb, var(--surface-container-lowest) 80%, transparent) !important;
+      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: none !important;
+    }
+    .top-app-bar { border-bottom: 1px solid var(--outline-variant) !important; }
+    .bottom-nav { border-top: 1px solid var(--outline-variant) !important; }
+
+    /* Modern Events Grid */
+    .events-grid { display: grid; grid-template-columns: 1fr; gap: 1.25rem; }
+    @media (min-width: 640px) { .events-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (min-width: 1024px) { .events-grid { grid-template-columns: repeat(3, 1fr); } }
+
+    .event-card {
+      background: var(--surface-container-lowest); border-radius: var(--radius-xl); overflow: hidden;
+      box-shadow: var(--shadow-ambient); border: 1px solid var(--outline-variant); cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s; position: relative;
+    }
+    .event-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-soft); }
+    
+    .event-cover { width: 100%; height: 180px; object-fit: cover; }
+    .event-overlay {
+      position: absolute; top: 1rem; right: 1rem; background: rgba(0,0,0,0.6); color: white;
+      padding: 0.35rem 0.75rem; border-radius: 100px; font-size: 0.75rem; font-weight: 700; backdrop-filter: blur(4px);
+    }
+    .event-body { padding: 1.25rem; }
+    .event-title { font-family: var(--font-headline); font-size: 1.1rem; font-weight: 800; margin: 0 0 0.5rem 0; color: var(--on-surface); }
+    .event-meta { display: flex; align-items: center; gap: 0.5rem; color: var(--outline); font-size: 0.75rem; margin-bottom: 0.25rem; }
+    .event-meta .material-symbols-outlined { font-size: 1rem; }
+  </style>
+</head>
+<body>
+  <script>
+    if (localStorage.getItem('kwabz_theme_mode') === 'dark') document.body.classList.add('dark-mode');
+  </script>
+
+  <!-- Top App Bar -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <span class="top-app-bar__title font-headline">Upcoming Events</span>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="page-content" style="padding-bottom: 7rem; padding-top: 5rem;">
+    
+    <!-- Hero / Featured -->
+    <div id="eventsHero" style="position:relative; margin-top:-5rem; margin-bottom: 2rem; display:none; background:var(--surface-container-high); overflow:hidden;">
+      <div id="eventsHeroSlider" style="display:flex; transition:transform 0.5s ease; height: 350px;">
+        <!-- Images injected here -->
+      </div>
+      <div style="position:absolute; inset:0; background:linear-gradient(180deg, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.8) 100%);"></div>
+      <div style="position:absolute; bottom:2rem; left:1.5rem; right:1.5rem; text-align:center; color:white;">
+        <h1 id="eventsHeroTitle" class="font-headline text-display" style="font-size:2.5rem; margin-bottom:0.5rem; text-shadow:0 4px 12px rgba(0,0,0,0.5);">Live Experiences</h1>
+        <p id="eventsHeroDesc" class="text-body-md" style="max-width:500px; margin: 0 auto; color:rgba(255,255,255,0.9);">Discover and buy tickets to the most exclusive parties, summits, and campus events.</p>
+      </div>
+    </div>
+    
+    <div id="eventsHeroTextOnly" style="text-align:center; margin-bottom: 2rem;">
+      <h1 id="eventsHeroTitleText" class="font-headline text-display">Live Experiences</h1>
+      <p id="eventsHeroDescText" class="text-body-md" style="color:var(--outline); max-width:500px; margin: 0 auto;">Discover and buy tickets to the most exclusive parties, summits, and campus events.</p>
+    </div>
+
+    <!-- Events List -->
+    <div class="events-grid" id="eventsList">
+      <!-- Loading Skeletons -->
+      <div class="skeleton-card" style="height: 300px;"></div>
+      <div class="skeleton-card" style="height: 300px;"></div>
+    </div>
+    
+    <div id="eventsEmptyState" class="empty-state" style="display:none; padding:4rem;">
+      <span class="material-symbols-outlined empty-state__icon">event_busy</span>
+      <p class="empty-state__title">No Upcoming Events</p>
+      <p class="empty-state__text">Check back later for new experiences.</p>
+    </div>
+
+  </main>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-item" onclick="window.location.href='index.html'">
+      <span class="material-symbols-outlined nav-icon">home</span>
+      <span class="nav-label">Home</span>
+    </button>
+    <button class="nav-item active" onclick="window.location.href='events.html'">
+      <span class="material-symbols-outlined nav-icon">event</span>
+      <span class="nav-label">Events</span>
+    </button>
+    <button class="nav-item" onclick="window.location.href='account.html'">
+      <span class="material-symbols-outlined nav-icon">person</span>
+      <span class="nav-label">Account</span>
+    </button>
+  </nav>
+
+  <!-- Firebase & Third Party Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <script type="module">
+    import { firebaseConfig } from './config.js';
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    function loadEvents() {
+      db.collection('events')
+        .where('status', '==', 'active')
+        .onSnapshot(snap => {
+          const container = document.getElementById('eventsList');
+          const empty = document.getElementById('eventsEmptyState');
+          
+          if (snap.empty) {
+            container.innerHTML = '';
+            empty.style.display = 'flex';
+            return;
+          }
+          
+          empty.style.display = 'none';
+          let html = '';
+          
+          const eventsData = [];
+          snap.forEach(doc => {
+            eventsData.push({ id: doc.id, ...doc.data() });
+          });
+          
+          // Client-side sort by created_at (descending) to avoid requiring Firestore composite index
+          eventsData.sort((a, b) => {
+            const timeA = a.created_at ? a.created_at.toMillis() : 0;
+            const timeB = b.created_at ? b.created_at.toMillis() : 0;
+            return timeB - timeA;
+          });
+
+          eventsData.forEach(data => {
+            // Format Date safely
+            let formattedDate = data.date;
+            try {
+              const d = new Date(data.date);
+              formattedDate = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+            } catch(e) {}
+
+            html += `
+              <div class="event-card" onclick="window.location.href='event-detail.html?id=${data.id}'">
+                <img src="${data.cover_image || 'placeholder.jpg'}" class="event-cover" />
+                <div class="event-overlay">${formattedDate}</div>
+                <div class="event-body">
+                  <h3 class="event-title">${data.title}</h3>
+                  <div class="event-meta">
+                    <span class="material-symbols-outlined">schedule</span> ${data.time}
+                  </div>
+                  <div class="event-meta">
+                    <span class="material-symbols-outlined">location_on</span> ${data.location}
+                  </div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-top:1rem; border-top:1px solid var(--outline-variant); padding-top:0.75rem;">
+                    <span style="font-size:0.7rem; color:var(--outline); font-weight:700;">BY ${(data.organizer_name || 'Organizer').toUpperCase()}</span>
+                    <button class="btn-primary" style="padding: 0.35rem 0.85rem; height:auto; border-radius:100px; font-size:0.75rem;">Get Tickets</button>
+                  </div>
+                </div>
+              </div>
+            `;
+          });
+          container.innerHTML = html;
+        });
+    }
+
+    function initHeroSlider(images) {
+      const slider = document.getElementById('eventsHeroSlider');
+      slider.innerHTML = images.map(img => `<img src="${img}" style="width:100%; height:100%; object-fit:cover; flex-shrink:0;" />`).join('');
+      let current = 0;
+      if (images.length > 1) {
+        setInterval(() => {
+          current = (current + 1) % images.length;
+          slider.style.transform = `translateX(-${current * 100}%)`;
+        }, 4000);
+      }
+    }
+
+    function applyTheme() {
+      try {
+        const theme = JSON.parse(localStorage.getItem('kwabz_settings') || '{}').theme || {};
+        const title = theme.eventHeroTitle || 'Live Experiences';
+        const desc = theme.eventHeroDesc || 'Discover and buy tickets to the most exclusive parties, summits, and campus events.';
+        
+        document.getElementById('eventsHeroTitle').innerText = title;
+        document.getElementById('eventsHeroDesc').innerText = desc;
+        document.getElementById('eventsHeroTitleText').innerText = title;
+        document.getElementById('eventsHeroDescText').innerText = desc;
+
+        const images = [theme.eventHeroImage1, theme.eventHeroImage2, theme.eventHeroImage3].filter(Boolean);
+        
+        if (images.length > 0) {
+          document.getElementById('eventsHeroTextOnly').style.display = 'none';
+          document.getElementById('eventsHero').style.display = 'block';
+          initHeroSlider(images);
+        }
+      } catch(e) {
+        console.error('Theme load error:', e);
+      }
+    }
+
+    // Load events and theme on mount
+    applyTheme();
+    loadEvents();
+  </script>
+</body>
+</html>

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Event Checkout — Kwabz Store</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&family=Inter:wght@100..900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  
+  <style>
+    body { background-color: var(--background); }
+    .top-app-bar {
+      background: color-mix(in srgb, var(--surface-container-lowest) 80%, transparent) !important;
+      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border-bottom: 1px solid var(--outline-variant) !important;
+    }
+    
+    .checkout-container { max-width: 600px; margin: 0 auto; padding: 1.5rem; padding-top: 5rem; }
+    
+    .order-summary {
+      background: var(--surface-container-low); border: 1px solid var(--outline-variant);
+      border-radius: var(--radius-xl); padding: 1.25rem; margin-bottom: 1.5rem;
+    }
+
+    .ticket-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    .ticket-row:last-child { margin-bottom: 0; }
+    .ticket-name { font-weight: 700; color: var(--on-surface); font-size: 0.9rem; }
+    .ticket-price { font-weight: 800; color: var(--primary); font-size: 0.9rem; }
+    
+    .divider { height: 1px; background: var(--outline-variant); margin: 1rem 0; }
+    
+    .total-row { display: flex; justify-content: space-between; align-items: center; }
+    .total-label { font-weight: 800; font-size: 1rem; color: var(--on-surface); }
+    .total-price { font-weight: 900; font-size: 1.5rem; color: var(--primary); }
+    
+    #successState { display: none; text-align: center; padding: 2rem 1rem; }
+    #qrcode { display: flex; justify-content: center; margin: 1.5rem 0; padding: 1rem; background: white; border-radius: 1rem; border: 4px solid var(--primary); display: inline-block; }
+  </style>
+</head>
+<body>
+  <script>
+    if (localStorage.getItem('kwabz_theme_mode') === 'dark') document.body.classList.add('dark-mode');
+  </script>
+
+  <!-- Top App Bar -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <button class="btn-icon" onclick="history.back()" id="backBtn">
+        <span class="material-symbols-outlined">arrow_back</span>
+      </button>
+      <span class="top-app-bar__title font-headline">Checkout</span>
+    </div>
+  </header>
+
+  <main class="page-content checkout-container">
+    
+    <div id="checkoutFormState">
+      <h2 class="font-headline text-headline-md" style="margin-bottom: 1.5rem;">Secure Your Tickets</h2>
+      
+      <div class="order-summary" id="orderSummary">
+        <!-- Rendered via JS -->
+      </div>
+
+      <form id="ticketCheckoutForm" onsubmit="processCheckout(event)">
+        <h3 class="font-headline" style="font-size:1.1rem; margin-bottom: 1rem;">Your Information</h3>
+        
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label class="form-group__label">Full Name</label>
+          <input type="text" id="buyerName" class="minimal-input" required placeholder="John Doe" />
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label class="form-group__label">Phone Number (WhatsApp)</label>
+          <input type="tel" id="buyerPhone" class="minimal-input" required placeholder="0500000000" />
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1.5rem;">
+          <label class="form-group__label">Email Address (Optional)</label>
+          <input type="email" id="buyerEmail" class="minimal-input" placeholder="john@example.com" />
+        </div>
+
+        <button type="submit" id="btnPlaceOrder" class="btn-primary" style="width:100%; padding: 1rem; font-size:1.1rem;">
+          Confirm & Pay
+        </button>
+      </form>
+    </div>
+
+    <!-- Success State -->
+    <div id="successState">
+      <span class="material-symbols-outlined" style="font-size:4rem; color:#22c55e; margin-bottom:1rem;">check_circle</span>
+      <h2 class="font-headline text-headline-md" style="margin-bottom: 0.5rem;">Tickets Secured!</h2>
+      <p class="text-body-md" style="color:var(--outline); margin-bottom: 1.5rem;">Take a screenshot of your ticket QR code below for gate check-in.</p>
+      
+      <div id="qrcode"></div>
+      
+      <p style="font-size:0.75rem; font-weight:700; margin-top:1rem; color:var(--primary);">Ticket ID: <span id="ticketIdDisplay"></span></p>
+
+      <button onclick="window.location.href='events.html'" class="btn-secondary" style="width:100%; margin-top:2rem;">Back to Events</button>
+    </div>
+
+  </main>
+
+  <!-- Firebase Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <script type="module">
+    import { firebaseConfig } from './config.js';
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const eventId = urlParams.get('id');
+    const cartRaw = sessionStorage.getItem('kwabz_event_cart');
+    let cart = [];
+    
+    try {
+      cart = JSON.parse(cartRaw);
+    } catch(e) {}
+
+    if (!cart || cart.length === 0 || !eventId) {
+      alert("No tickets selected.");
+      window.location.href = 'events.html';
+    }
+
+    let totalPrice = 0;
+    let totalQty = 0;
+
+    function renderSummary() {
+      const summary = document.getElementById('orderSummary');
+      let html = '';
+      
+      cart.forEach(item => {
+        totalQty += item.quantity;
+        totalPrice += (item.quantity * item.price);
+        html += `
+          <div class="ticket-row">
+            <div>
+              <span class="ticket-name">${item.name}</span>
+              <span style="color:var(--outline); font-size:0.8rem; margin-left:0.5rem;">x${item.quantity}</span>
+            </div>
+            <span class="ticket-price">GH₵${(item.quantity * item.price).toFixed(2)}</span>
+          </div>
+        `;
+      });
+
+      html += `<div class="divider"></div>
+        <div class="total-row">
+          <span class="total-label">Total</span>
+          <span class="total-price">GH₵${totalPrice.toFixed(2)}</span>
+        </div>
+      `;
+
+      summary.innerHTML = html;
+    }
+
+    renderSummary();
+
+    window.processCheckout = async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btnPlaceOrder');
+      btn.disabled = true;
+      btn.innerText = "Processing...";
+
+      const name = document.getElementById('buyerName').value;
+      const phone = document.getElementById('buyerPhone').value;
+      const email = document.getElementById('buyerEmail').value;
+
+      try {
+        const batch = db.batch();
+        const primaryTicketId = db.collection('event_attendees').doc().id; // Use first ticket ID for the QR code display
+
+        // We generate a ticket for every single quantity purchased!
+        let isFirst = true;
+        let generatedTicketId = primaryTicketId;
+
+        for (const item of cart) {
+          for (let i = 0; i < item.quantity; i++) {
+            const ticketRef = isFirst ? db.collection('event_attendees').doc(primaryTicketId) : db.collection('event_attendees').doc();
+            
+            batch.set(ticketRef, {
+              event_id: eventId,
+              ticket_tier_id: item.ticketId,
+              tier_name: item.name,
+              user_uid: 'guest',
+              buyer_name: name,
+              buyer_phone: phone,
+              buyer_email: email,
+              purchase_date: firebase.firestore.FieldValue.serverTimestamp(),
+              payment_status: 'paid', // Assuming WhatsApp confirmation or cash at gate
+              scanned: false,
+              price: item.price
+            });
+
+            isFirst = false;
+          }
+
+          // Increment sold quantity (using FieldValue increment for atomic update)
+          const tierRef = db.collection('event_tickets').doc(item.ticketId);
+          batch.update(tierRef, {
+            sold_quantity: firebase.firestore.FieldValue.increment(item.quantity)
+          });
+        }
+
+        // Commit batch
+        await batch.commit();
+        sessionStorage.removeItem('kwabz_event_cart');
+
+        // Show Success
+        document.getElementById('checkoutFormState').style.display = 'none';
+        document.getElementById('backBtn').style.display = 'none';
+        document.getElementById('successState').style.display = 'block';
+        document.getElementById('ticketIdDisplay').innerText = generatedTicketId;
+
+        // Generate QR
+        new QRCode(document.getElementById("qrcode"), {
+          text: generatedTicketId,
+          width: 200,
+          height: 200,
+          colorDark : "#000000",
+          colorLight : "#ffffff",
+          correctLevel : QRCode.CorrectLevel.H
+        });
+
+      } catch (err) {
+        alert("Error processing ticket: " + err.message);
+        btn.disabled = false;
+        btn.innerText = "Confirm & Pay";
+      }
+    };
+
+  </script>
+</body>
+</html>

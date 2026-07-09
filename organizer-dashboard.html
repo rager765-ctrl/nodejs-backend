@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Organizer Dashboard — Kwabz Events</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&family=Inter:wght@100..900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet" />
+  
+  <style>
+    body { background-color: var(--background); }
+    .tab-content { display: none; animation: fadeIn 0.3s ease; }
+    .tab-content.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .top-app-bar, .bottom-nav {
+      background: color-mix(in srgb, var(--surface-container-lowest) 80%, transparent) !important;
+      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); border: none !important;
+    }
+    .top-app-bar { border-bottom: 1px solid var(--outline-variant) !important; }
+    .bottom-nav { border-top: 1px solid var(--outline-variant) !important; }
+    
+    .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    
+    /* Upload Zone */
+    .upload-zone {
+      border: 2px dashed var(--outline-variant); border-radius: var(--radius-xl); padding: 2rem;
+      text-align: center; cursor: pointer; position: relative; background: var(--surface-container-low);
+      overflow: hidden; min-height: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .upload-zone:hover { border-color: var(--primary); }
+    .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 2; }
+    .upload-zone img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; margin: 0; }
+    
+    /* Scanner UI */
+    #qr-reader { width: 100%; max-width: 500px; margin: 0 auto; border-radius: var(--radius-xl); overflow: hidden; border: 2px solid var(--primary); box-shadow: var(--shadow-ambient); }
+    #qr-reader__scan_region { background: #000; }
+    #qr-reader__dashboard_section_csr span { color: var(--on-surface) !important; }
+  </style>
+</head>
+<body>
+  <script>
+    if (localStorage.getItem('kwabz_theme_mode') === 'dark') document.body.classList.add('dark-mode');
+  </script>
+
+  <!-- Top App Bar -->
+  <header class="top-app-bar glass">
+    <div style="display:flex;align-items:center;gap:1rem;">
+      <span class="top-app-bar__title font-headline">Organizer Portal</span>
+      <div id="syncStatus" style="font-size:0.55rem;font-weight:900;letter-spacing:0.08em;padding:0.2rem 0.5rem;border-radius:2rem;display:flex;align-items:center;gap:0.25rem;color:var(--outline);">
+        <span style="width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px rgba(34,197,94,0.25);"></span> LIVE
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="page-content" style="padding-bottom: 7rem;">
+    
+    <!-- TAB 1: OVERVIEW -->
+    <div id="tab-overview" class="tab-content active">
+      <div style="margin-bottom: 2rem;">
+        <p class="text-label-md" style="color:var(--outline);">Welcome back,</p>
+        <h2 class="font-headline text-display" id="organizerNameDisplay">Organizer</h2>
+      </div>
+
+      <div class="stats-grid">
+        <div style="padding:1.5rem; background:var(--surface-container-lowest); border-radius:1.25rem; box-shadow: var(--shadow-soft);">
+          <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+            <div style="background:rgba(37,99,235,0.1); border-radius:0.5rem; width:2rem; height:2rem; display:flex; align-items:center; justify-content:center;">
+              <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.2rem;">account_balance_wallet</span>
+            </div>
+            <p style="font-size:0.7rem; font-weight:700; color:var(--outline); margin:0;">TICKET REVENUE</p>
+          </div>
+          <p id="statRevenue" style="font-size:2rem; font-weight:800; color:var(--primary); margin:0; letter-spacing:-0.02em;">GH₵0.00</p>
+        </div>
+        
+        <div style="padding:1.5rem; background:var(--surface-container-lowest); border-radius:1.25rem; box-shadow: var(--shadow-soft);">
+          <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+            <div style="background:rgba(34,197,94,0.1); border-radius:0.5rem; width:2rem; height:2rem; display:flex; align-items:center; justify-content:center;">
+              <span class="material-symbols-outlined" style="color:#16a34a; font-size:1.2rem;">confirmation_number</span>
+            </div>
+            <p style="font-size:0.7rem; font-weight:700; color:var(--outline); margin:0;">TICKETS SOLD</p>
+          </div>
+          <p id="statTicketsSold" style="font-size:2rem; font-weight:800; color:var(--on-surface); margin:0; letter-spacing:-0.02em;">0</p>
+        </div>
+      </div>
+
+      <!-- Recent Attendees -->
+      <div style="margin-top: 2.5rem;">
+        <h3 class="font-headline text-title-md" style="margin-bottom:1rem;">Recent Attendees</h3>
+        <div id="attendeesList" style="background:var(--surface-container-lowest); border-radius:1.25rem; border:1px solid var(--outline-variant); overflow:hidden;">
+          <div style="padding:2rem; text-align:center; color:var(--outline); font-size:0.8125rem;">
+            Loading attendees...
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: MY EVENTS -->
+    <div id="tab-events" class="tab-content">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
+        <h2 class="font-headline text-headline-lg">My Events</h2>
+        <button onclick="openCreateEventModal()" class="btn-primary" style="width: auto; padding: 0.5rem 1.25rem; height: auto; border-radius: 100px; display:flex; align-items:center; gap:0.5rem; font-size: 0.8125rem;">
+          <span class="material-symbols-outlined" style="font-size:1.1rem;">add</span> New Event
+        </button>
+      </div>
+
+      <div id="eventsList" style="display:flex; flex-direction:column; gap:1rem;"></div>
+      <div id="eventsEmptyState" class="empty-state" style="display:flex; padding:3rem;">
+        <span class="material-symbols-outlined empty-state__icon">event_note</span>
+        <p class="empty-state__title">No Events Created</p>
+        <p class="empty-state__text">Start selling tickets by creating your first event.</p>
+      </div>
+    </div>
+
+    <!-- TAB 3: SCANNER -->
+    <div id="tab-scanner" class="tab-content">
+      <div style="text-align:center; margin-bottom:1.5rem;">
+        <h2 class="font-headline text-headline-lg">Gate Check-in</h2>
+        <p class="text-body-sm" style="color:var(--outline);">Scan attendees' QR codes to verify tickets.</p>
+      </div>
+      
+      <div id="qr-reader"></div>
+      
+      <div id="scanResultContainer" style="display:none; margin-top:1.5rem; text-align:center; padding:1.5rem; background:var(--surface-container-high); border-radius:var(--radius-xl);">
+        <span id="scanIcon" class="material-symbols-outlined" style="font-size:3rem; margin-bottom:0.5rem;"></span>
+        <h3 id="scanTitle" class="font-headline" style="font-size:1.25rem; margin-bottom:0.5rem;"></h3>
+        <p id="scanDetails" class="text-body-sm" style="color:var(--outline);"></p>
+        <button onclick="resetScanner()" class="btn-secondary" style="margin-top:1rem; width:100%;">Scan Next Ticket</button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" onclick="switchTab('overview')">
+      <span class="material-symbols-outlined nav-icon">dashboard</span>
+      <span class="nav-label">Overview</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('events')">
+      <span class="material-symbols-outlined nav-icon">event</span>
+      <span class="nav-label">Events</span>
+    </button>
+    <button class="nav-item" onclick="switchTab('scanner')">
+      <span class="material-symbols-outlined nav-icon">qr_code_scanner</span>
+      <span class="nav-label">Scanner</span>
+    </button>
+  </nav>
+
+  <!-- Create Event Modal -->
+  <div id="createEventModal" class="modal-overlay" onclick="if(event.target === this) closeCreateEventModal()">
+    <div class="modal-content" style="max-width:500px; max-height:90vh; overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <h3 class="font-headline text-headline-md" style="margin-bottom: 1rem;">Create New Event</h3>
+      
+      <form id="createEventForm" onsubmit="handleCreateEvent(event)">
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label class="form-group__label">Event Banner / Flyer</label>
+          <div class="upload-zone" id="eventCoverUploadZone">
+            <span class="material-symbols-outlined" style="font-size:2rem;color:var(--outline);">add_a_photo</span>
+            <p style="font-size: 0.8125rem; font-weight:700;">Upload 16:9 Banner</p>
+            <input type="file" id="eventCoverInput" accept="image/*" onchange="previewEventCover(this)" required />
+            <img id="eventCoverPreview" style="display:none;" />
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label class="form-group__label">Event Title</label>
+          <input type="text" id="eventTitle" class="minimal-input" required placeholder="e.g., Campus Beach Party" />
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label class="form-group__label">Description</label>
+          <textarea id="eventDescription" class="minimal-input" rows="3" required placeholder="Event details..."></textarea>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+          <div class="form-group">
+            <label class="form-group__label">Date</label>
+            <input type="date" id="eventDate" class="minimal-input" required />
+          </div>
+          <div class="form-group">
+            <label class="form-group__label">Time</label>
+            <input type="time" id="eventTime" class="minimal-input" required />
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1.5rem;">
+          <label class="form-group__label">Location</label>
+          <input type="text" id="eventLocation" class="minimal-input" required placeholder="e.g., University Main Hall" />
+        </div>
+
+        <button type="submit" class="btn-primary" style="width:100%; padding:1rem;" id="btnCreateEvent">Create Event</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Manage Tickets Modal -->
+  <div id="manageTicketsModal" class="modal-overlay" onclick="if(event.target === this) closeManageTicketsModal()">
+    <div class="modal-content" style="max-width:500px; max-height:90vh; overflow-y:auto; padding-bottom: 2rem;">
+      <div class="modal-handle"></div>
+      <h3 class="font-headline text-headline-md" style="margin-bottom: 0.25rem;">Manage Tickets</h3>
+      <p id="manageTicketsEventTitle" class="text-body-sm" style="color:var(--outline); margin-bottom:1.5rem;"></p>
+      
+      <div id="ticketsList" style="display:flex; flex-direction:column; gap:0.75rem; margin-bottom: 1.5rem;">
+        <!-- Existing Tickets will be listed here -->
+      </div>
+
+      <div style="background:var(--surface-container-low); padding:1rem; border-radius:var(--radius-xl); border:1px solid var(--outline-variant);">
+        <h4 class="font-headline text-title-md" style="margin-bottom: 1rem;">Add New Ticket Tier</h4>
+        <form id="createTicketForm" onsubmit="handleCreateTicket(event)">
+          <input type="hidden" id="manageTicketsEventId" />
+          
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <label class="form-group__label">Ticket Name (e.g. VIP, Regular)</label>
+            <input type="text" id="ticketName" class="minimal-input" required placeholder="VIP Ticket" />
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+            <div class="form-group">
+              <label class="form-group__label">Price (GH₵)</label>
+              <input type="number" id="ticketPrice" class="minimal-input" required min="0" step="0.1" placeholder="50.00" />
+            </div>
+            <div class="form-group">
+              <label class="form-group__label">Total Quantity</label>
+              <input type="number" id="ticketQuantity" class="minimal-input" required min="1" placeholder="100" />
+            </div>
+          </div>
+
+          <button type="submit" class="btn-primary" style="width:100%; padding:0.75rem;" id="btnCreateTicket">Add Ticket Tier</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase & Third Party Scripts -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+  <script type="module">
+    import { firebaseConfig } from './config.js';
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.firestore();
+    const storage = firebase.storage();
+    const auth = firebase.auth();
+
+    let html5QrcodeScanner = null;
+
+    // Admin manages all events straight
+    document.getElementById('organizerNameDisplay').innerText = 'Administrator';
+    
+    // Wait for auth to initialize so Firestore rules (admin checks) pass
+    auth.onAuthStateChanged((user) => {
+      loadMyEvents();
+    });
+
+    // Tab Switching Logic
+    window.switchTab = function(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.bottom-nav .nav-item').forEach(el => el.classList.remove('active'));
+      
+      document.getElementById('tab-' + tabId).classList.add('active');
+      const activeBtn = Array.from(document.querySelectorAll('.bottom-nav .nav-item')).find(el => el.innerText.toLowerCase().includes(tabId));
+      if (activeBtn) activeBtn.classList.add('active');
+
+      if (tabId === 'scanner') {
+        initScanner();
+      } else if (html5QrcodeScanner) {
+        html5QrcodeScanner.clear().catch(e => console.error(e));
+        html5QrcodeScanner = null;
+      }
+    };
+
+    // Modal Logic
+    let editingEventId = null;
+    
+    window.openCreateEventModal = () => document.getElementById('createEventModal').classList.add('open');
+    window.closeCreateEventModal = () => {
+      document.getElementById('createEventModal').classList.remove('open');
+      editingEventId = null;
+      document.getElementById('createEventForm').reset();
+      document.getElementById('btnCreateEvent').innerText = 'Create Event';
+      document.getElementById('eventCoverInput').setAttribute('required', 'true');
+      document.getElementById('eventCoverPreview').style.display = 'none';
+      document.getElementById('eventCoverUploadZone').querySelector('.material-symbols-outlined').style.display = 'block';
+      document.getElementById('eventCoverUploadZone').querySelector('p').style.display = 'block';
+    };
+    
+    let currentTicketsUnsub = null;
+    let editingTicketId = null;
+    
+    window.openManageTicketsModal = (eventId, eventTitle) => {
+      document.getElementById('manageTicketsEventId').value = eventId;
+      document.getElementById('manageTicketsEventTitle').innerText = eventTitle;
+      document.getElementById('manageTicketsModal').classList.add('open');
+      loadTickets(eventId);
+    };
+    window.closeManageTicketsModal = () => {
+      document.getElementById('manageTicketsModal').classList.remove('open');
+      if (currentTicketsUnsub) currentTicketsUnsub();
+      editingTicketId = null;
+      document.getElementById('createTicketForm').reset();
+      const btn = document.getElementById('btnCreateTicket');
+      btn.innerText = 'Add Ticket Tier';
+      btn.classList.remove('btn-secondary');
+      btn.classList.add('btn-primary');
+    };
+
+    function loadTickets(eventId) {
+      if (currentTicketsUnsub) currentTicketsUnsub();
+      currentTicketsUnsub = db.collection('event_tickets')
+        .where('event_id', '==', eventId)
+        .onSnapshot(snap => {
+          const list = document.getElementById('ticketsList');
+          if (snap.empty) {
+            list.innerHTML = '<p class="text-body-sm" style="color:var(--outline); text-align:center;">No tickets added yet.</p>';
+            return;
+          }
+          let html = '';
+          snap.forEach(doc => {
+            const t = doc.data();
+            const sold = t.sold_quantity || 0;
+            const percentage = Math.round((sold / t.total_quantity) * 100);
+            html += `
+              <div style="background:var(--surface-container-lowest); border:1px solid var(--outline-variant); padding:1rem; border-radius:var(--radius-lg); display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                  <h4 style="margin:0; font-weight:800; color:var(--on-surface); font-size:0.9rem;">${t.name}</h4>
+                  <p style="margin:0; color:var(--primary); font-weight:700; font-size:0.875rem;">GH₵ ${Number(t.price).toFixed(2)}</p>
+                </div>
+                <div style="text-align:right;">
+                  <p style="margin:0; color:var(--outline); font-size:0.75rem;"><b>${sold}</b> / ${t.total_quantity} sold</p>
+                  <div style="width:80px; height:6px; background:var(--surface-container-high); border-radius:10px; margin-top:0.25rem; overflow:hidden;">
+                    <div style="height:100%; width:${percentage}%; background:var(--primary);"></div>
+                  </div>
+                  <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
+                    <button onclick="editTicket('${doc.id}', '${t.name.replace(/'/g, "\\'")}', ${t.price}, ${t.total_quantity})" style="background:none; border:none; cursor:pointer; padding:0;" title="Edit Ticket">
+                      <span class="material-symbols-outlined" style="font-size:1.1rem; color:var(--primary);">edit</span>
+                    </button>
+                    <button onclick="deleteTicket('${doc.id}')" style="background:none; border:none; cursor:pointer; padding:0;" title="Delete Ticket">
+                      <span class="material-symbols-outlined" style="font-size:1.1rem; color:var(--error);">delete</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            `;
+          });
+          list.innerHTML = html;
+        });
+    }
+
+    window.editTicket = (id, name, price, qty) => {
+      editingTicketId = id;
+      document.getElementById('ticketName').value = name;
+      document.getElementById('ticketPrice').value = price;
+      document.getElementById('ticketQuantity').value = qty;
+      const btn = document.getElementById('btnCreateTicket');
+      btn.innerText = 'Update Ticket Tier';
+      btn.classList.remove('btn-primary');
+      btn.classList.add('btn-secondary');
+    };
+
+    window.deleteTicket = async (id) => {
+      if(!confirm('Are you sure you want to delete this ticket tier?')) return;
+      try {
+        await db.collection('event_tickets').doc(id).delete();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+
+    window.handleCreateTicket = async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btnCreateTicket');
+      btn.disabled = true;
+      const originalText = btn.innerText;
+      btn.innerText = 'Saving...';
+      try {
+        const ticketData = {
+          event_id: document.getElementById('manageTicketsEventId').value,
+          name: document.getElementById('ticketName').value,
+          price: parseFloat(document.getElementById('ticketPrice').value),
+          total_quantity: parseInt(document.getElementById('ticketQuantity').value)
+        };
+
+        if (editingTicketId) {
+          await db.collection('event_tickets').doc(editingTicketId).update(ticketData);
+          editingTicketId = null;
+          btn.innerText = 'Add Ticket Tier';
+          btn.classList.remove('btn-secondary');
+          btn.classList.add('btn-primary');
+        } else {
+          ticketData.sold_quantity = 0;
+          await db.collection('event_tickets').add(ticketData);
+        }
+        
+        document.getElementById('createTicketForm').reset();
+      } catch (err) {
+        alert('Error: ' + err.message);
+        btn.innerText = originalText;
+      } finally {
+        btn.disabled = false;
+        if (!editingTicketId) {
+          btn.innerText = 'Add Ticket Tier';
+        }
+      }
+    };
+
+    // Image Preview
+    window.previewEventCover = (input) => {
+      if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = e => {
+          const img = document.getElementById('eventCoverPreview');
+          img.src = e.target.result;
+          img.style.display = 'block';
+        };
+        reader.readAsDataURL(input.files[0]);
+      }
+    };
+
+    // Create Event
+    window.handleCreateEvent = async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btnCreateEvent');
+      btn.innerText = 'Uploading...';
+      btn.disabled = true;
+
+      try {
+        let imageUrl = '';
+        const file = document.getElementById('eventCoverInput').files[0];
+        if (file) {
+          imageUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                const maxDim = 1200;
+                
+                if (width > height && width > maxDim) {
+                  height *= maxDim / width;
+                  width = maxDim;
+                } else if (height > maxDim) {
+                  width *= maxDim / height;
+                  height = maxDim;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                resolve(canvas.toDataURL('image/webp', 0.8));
+              };
+              img.onerror = () => reject(new Error("Invalid image file"));
+              img.src = e.target.result;
+            };
+            reader.onerror = () => reject(new Error("Failed to read file"));
+            reader.readAsDataURL(file);
+          });
+        }
+
+        const eventData = {
+          title: document.getElementById('eventTitle').value,
+          description: document.getElementById('eventDescription').value,
+          date: document.getElementById('eventDate').value,
+          time: document.getElementById('eventTime').value,
+          location: document.getElementById('eventLocation').value,
+          organizer_uid: 'admin',
+          organizer_name: 'Kwabz Admin',
+          status: 'active'
+        };
+        
+        if (imageUrl) {
+          eventData.cover_image = imageUrl;
+        }
+
+        if (editingEventId) {
+          await db.collection('events').doc(editingEventId).update(eventData);
+        } else {
+          eventData.created_at = firebase.firestore.FieldValue.serverTimestamp();
+          await db.collection('events').add(eventData);
+        }
+        
+        closeCreateEventModal();
+        alert(editingEventId ? 'Event Updated Successfully!' : 'Event Created Successfully!');
+      } catch (error) {
+        console.error("Error creating/updating event:", error);
+        alert(error.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = editingEventId ? 'Update Event' : 'Create Event';
+      }
+    };
+    
+    window.editEvent = async (id) => {
+      editingEventId = id;
+      const doc = await db.collection('events').doc(id).get();
+      const data = doc.data();
+      document.getElementById('eventTitle').value = data.title || '';
+      document.getElementById('eventDescription').value = data.description || '';
+      document.getElementById('eventDate').value = data.date || '';
+      document.getElementById('eventTime').value = data.time || '';
+      document.getElementById('eventLocation').value = data.location || '';
+      
+      if (data.cover_image) {
+        const pv = document.getElementById('eventCoverPreview');
+        pv.src = data.cover_image;
+        pv.style.display = 'block';
+        document.getElementById('eventCoverUploadZone').querySelector('.material-symbols-outlined').style.display = 'none';
+        document.getElementById('eventCoverUploadZone').querySelector('p').innerText = 'Tap to change image';
+        document.getElementById('eventCoverInput').removeAttribute('required');
+      }
+
+      document.getElementById('btnCreateEvent').innerText = 'Update Event';
+      openCreateEventModal();
+    };
+
+    window.deleteEvent = async (id) => {
+      if(!confirm('Are you sure you want to completely delete this event? This action cannot be undone.')) return;
+      try {
+        await db.collection('events').doc(id).delete();
+      } catch(err) {
+        alert(err.message);
+      }
+    };
+
+    // Load Events
+    function loadMyEvents() {
+      db.collection('events')
+        .onSnapshot(async snap => {
+          const container = document.getElementById('eventsList');
+          const empty = document.getElementById('eventsEmptyState');
+          
+          if (snap.empty) {
+            container.innerHTML = '';
+            empty.style.display = 'flex';
+            document.getElementById('statRevenue').innerText = 'GH₵0.00';
+            document.getElementById('statTicketsSold').innerText = '0';
+            return;
+          }
+          
+          empty.style.display = 'none';
+          let html = '';
+          let totalRevenue = 0;
+          let totalSold = 0;
+
+          const eventIds = [];
+          const eventsData = [];
+
+          snap.forEach(doc => {
+            eventsData.push({ id: doc.id, ...doc.data() });
+            eventIds.push(doc.id);
+          });
+
+          // Fetch all tickets for these events to calculate stats
+          const ticketsByEvent = {};
+          if (eventIds.length > 0) {
+            const chunks = [];
+            for(let i=0; i<eventIds.length; i+=10) chunks.push(eventIds.slice(i, i+10));
+            
+            for(const chunk of chunks) {
+              const tSnap = await db.collection('event_tickets').where('event_id', 'in', chunk).get();
+              tSnap.forEach(tDoc => {
+                const tData = tDoc.data();
+                const sold = tData.sold_quantity || 0;
+                totalSold += sold;
+                totalRevenue += (sold * tData.price);
+
+                if(!ticketsByEvent[tData.event_id]) {
+                   ticketsByEvent[tData.event_id] = { sold: 0, revenue: 0 };
+                }
+                ticketsByEvent[tData.event_id].sold += sold;
+                ticketsByEvent[tData.event_id].revenue += (sold * tData.price);
+              });
+            }
+          }
+
+          eventsData.forEach(data => {
+            const stats = ticketsByEvent[data.id] || { sold: 0, revenue: 0 };
+            
+            html += `
+              <div style="display:flex; flex-direction: column; background:var(--surface-container-low); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow-ambient);">
+                <div style="display:flex;">
+                  <img src="${data.cover_image}" style="width:100px; height:100px; object-fit:cover;" />
+                  <div style="padding:0.75rem; flex:1;">
+                    <h4 class="font-headline" style="margin:0 0 0.25rem 0;">${data.title}</h4>
+                    <p style="font-size:0.75rem; color:var(--outline); margin:0 0 0.5rem 0;">
+                      <span class="material-symbols-outlined" style="font-size:0.8rem; vertical-align:middle;">event</span> ${data.date} at ${data.time}
+                    </p>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                      <button onclick="openManageTicketsModal('${data.id}', '${(data.title || '').replace(/'/g, "\\'").replace(/"/g, '&quot;')}')" class="btn-secondary" style="padding:0.25rem 0.75rem; font-size:0.7rem; height:auto; width:auto; border-radius:100px;">
+                        Manage Tickets
+                      </button>
+                      <button onclick="editEvent('${data.id}')" title="Edit Event" style="background:none; border:none; cursor:pointer; color:var(--primary); padding:0; display:flex;">
+                        <span class="material-symbols-outlined" style="font-size:1.1rem;">edit</span>
+                      </button>
+                      <button onclick="deleteEvent('${data.id}')" title="Delete Event" style="background:none; border:none; cursor:pointer; color:var(--error); padding:0; display:flex;">
+                        <span class="material-symbols-outlined" style="font-size:1.1rem;">delete</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <!-- Per Event Stats -->
+                <div style="display:flex; border-top:1px solid var(--outline-variant); padding:0.5rem 0.75rem; background:var(--surface-container-lowest); justify-content:space-between;">
+                  <span style="font-size:0.75rem; color:var(--outline);"><b>${stats.sold}</b> Tickets Sold</span>
+                  <span style="font-size:0.75rem; font-weight:700; color:var(--primary);">GH₵${stats.revenue.toFixed(2)}</span>
+                </div>
+              </div>
+            `;
+          });
+          container.innerHTML = html;
+
+          document.getElementById('statRevenue').innerText = `GH₵${totalRevenue.toFixed(2)}`;
+          document.getElementById('statTicketsSold').innerText = totalSold;
+          
+          loadRecentAttendees(eventIds);
+        });
+    }
+
+    async function loadRecentAttendees(eventIds) {
+      const container = document.getElementById('attendeesList');
+      if (!eventIds || eventIds.length === 0) {
+        container.innerHTML = '<div style="padding:2rem; text-align:center; color:var(--outline); font-size:0.8125rem;">No tickets sold yet.</div>';
+        return;
+      }
+
+      const chunks = [];
+      for(let i=0; i<eventIds.length; i+=10) chunks.push(eventIds.slice(i, i+10));
+      
+      let allAttendees = [];
+      for(const chunk of chunks) {
+        const snap = await db.collection('event_attendees').where('event_id', 'in', chunk).get();
+        snap.forEach(doc => allAttendees.push({ id: doc.id, ...doc.data() }));
+      }
+      
+      allAttendees.sort((a,b) => {
+        const ta = a.purchase_date ? a.purchase_date.toMillis() : 0;
+        const tb = b.purchase_date ? b.purchase_date.toMillis() : 0;
+        return tb - ta;
+      });
+
+      if (allAttendees.length === 0) {
+        container.innerHTML = '<div style="padding:2rem; text-align:center; color:var(--outline); font-size:0.8125rem;">No tickets sold yet.</div>';
+        return;
+      }
+
+      let html = '<div style="display:grid; grid-template-columns:2fr 1fr 1fr 1fr; padding:1rem; border-bottom:1px solid var(--outline-variant); font-size:0.65rem; font-weight:800; color:var(--outline); letter-spacing:0.05em; text-transform:uppercase;"><span>Attendee</span><span>Ticket</span><span>Date</span><span>Gate</span></div>';
+      
+      allAttendees.slice(0, 50).forEach(att => {
+        const date = att.purchase_date ? new Date(att.purchase_date.toMillis()).toLocaleDateString('en-GB', { day:'numeric', month:'short' }) : 'N/A';
+        const scannedHtml = att.scanned 
+            ? `<span style="color:#22c55e; font-weight:700; display:flex; align-items:center; gap:0.25rem; font-size:0.75rem;"><span class="material-symbols-outlined" style="font-size:1rem;">check_circle</span> In</span>`
+            : `<span style="color:var(--outline); font-weight:700; font-size:0.75rem;">Pending</span>`;
+            
+        html += `
+          <div style="display:grid; grid-template-columns:2fr 1fr 1fr 1fr; padding:1rem; border-bottom:1px solid var(--outline-variant); align-items:center; gap:0.5rem;">
+            <div style="overflow:hidden;">
+              <p style="margin:0; font-weight:700; font-size:0.875rem; color:var(--on-surface); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${att.buyer_name}</p>
+              <p style="margin:0; font-size:0.75rem; color:var(--outline);">${att.buyer_phone}</p>
+            </div>
+            <div>
+              <span style="font-size:0.7rem; font-weight:700; background:rgba(37,99,235,0.1); padding:0.15rem 0.4rem; border-radius:0.25rem; color:var(--primary); white-space:nowrap;">${att.tier_name}</span>
+            </div>
+            <span style="font-size:0.75rem; color:var(--on-surface); font-weight:600;">${date}</span>
+            <div>${scannedHtml}</div>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+
+    // Scanner Logic
+    function initScanner() {
+      if (html5QrcodeScanner) return;
+      document.getElementById('scanResultContainer').style.display = 'none';
+      document.getElementById('qr-reader').style.display = 'block';
+
+      html5QrcodeScanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: {width: 250, height: 250} }, false);
+      html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+    }
+
+    async function onScanSuccess(decodedText, decodedResult) {
+      if(html5QrcodeScanner) {
+        html5QrcodeScanner.clear();
+        html5QrcodeScanner = null;
+      }
+      
+      document.getElementById('qr-reader').style.display = 'none';
+      const resultContainer = document.getElementById('scanResultContainer');
+      const scanIcon = document.getElementById('scanIcon');
+      const scanTitle = document.getElementById('scanTitle');
+      const scanDetails = document.getElementById('scanDetails');
+      
+      resultContainer.style.display = 'block';
+      scanIcon.innerText = 'hourglass_empty';
+      scanIcon.style.color = 'var(--outline)';
+      scanTitle.innerText = 'Verifying Ticket...';
+      scanDetails.innerText = 'Please wait while we check the database.';
+
+      try {
+        // Decode the text (Assuming the QR code contains the document ID of the attendee)
+        const ticketId = decodedText; 
+        const docRef = db.collection('event_attendees').doc(ticketId);
+        const docSnap = await docRef.get();
+
+        if (!docSnap.exists) {
+          throw new Error("Invalid Ticket / Not Found in Database.");
+        }
+
+        const data = docSnap.data();
+        
+        // Verify Organizer owns this event (Removed for global admin access)
+        const eventSnap = await db.collection('events').doc(data.event_id).get();
+
+        if (data.scanned) {
+          scanIcon.innerText = 'cancel';
+          scanIcon.style.color = 'var(--error)';
+          scanTitle.innerText = 'Ticket Already Scanned!';
+          scanDetails.innerText = `Warning: This ticket was already checked in. (Buyer: ${data.buyer_name})`;
+        } else {
+          // Check-in the user
+          await docRef.update({ scanned: true, scanned_at: firebase.firestore.FieldValue.serverTimestamp() });
+          scanIcon.innerText = 'check_circle';
+          scanIcon.style.color = '#22c55e';
+          scanTitle.innerText = 'Check-in Successful!';
+          scanDetails.innerText = `Valid Ticket. Buyer: ${data.buyer_name}`;
+        }
+      } catch (err) {
+        scanIcon.innerText = 'error';
+        scanIcon.style.color = 'var(--error)';
+        scanTitle.innerText = 'Scan Failed';
+        scanDetails.innerText = err.message;
+      }
+    }
+
+    function onScanFailure(error) {
+      // Background noise, ignore
+    }
+
+    window.resetScanner = () => {
+      initScanner();
+    };
+
+  </script>
+</body>
+</html>

@@ -2,44 +2,82 @@
 <html lang="en">
 
 <head>
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem('kwabz_theme_mode') || 'light';
+      if (savedTheme === 'dark') {
+        document.documentElement.classList.add('dark-mode');
+      }
+      // Synchronous theme token injection — eliminates nav flash before first paint
+      try {
+        const navBg = localStorage.getItem('kwabz_nav_bg_cache');
+        const primary = localStorage.getItem('kwabz_primary_cache');
+        const font = localStorage.getItem('kwabz_font_cache');
+        const parts = [];
+        if (navBg) {
+          parts.push('.top-app-bar{background-color:' + navBg + '!important}');
+          parts.push('.bottom-nav{background-color:' + navBg + '!important}');
+          parts.push('.bottom-nav-admin{background-color:' + navBg + '!important}');
+        }
+        if (primary) parts.push(':root{--primary:' + primary + '}');
+        if (font) parts.push(':root{--font-headline:' + font + ';--font-body:' + font + '}');
+        if (parts.length) {
+          const s = document.createElement('style');
+          s.id = 'kwabz-instant-theme';
+          s.textContent = parts.join('');
+          document.head.appendChild(s);
+        }
+      } catch (_) {}
+    })();
+  </script>
   <meta name="google-site-verification" content="83ra1swc0n0FVlU57Ui44HnyFzxKjMeh9wYofRP99-I" />
-
   <meta charset="utf-8" />
-  <meta name="viewport"
-    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Admin Dashboard — Kwabz Store</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" href="/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&family=Inter:wght@100..900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block" rel="stylesheet" />
 </head>
 
 <body>
+  <script>
+    if (localStorage.getItem('kwabz_theme_mode') === 'dark') {
+      document.body.classList.add('dark-mode');
+    }
+  </script>
 
   <!-- ═══ Top App Bar ═══ -->
   <header class="top-app-bar glass">
     <div style="display:flex;align-items:center;gap:1rem;">
-      <button class="icon-btn" onclick="document.getElementById('adminDrawer').classList.add('open')">
+      <button id="desktopMenuBtn" class="icon-btn" onclick="document.getElementById('adminDrawer').classList.add('open')">
         <span class="material-symbols-outlined">menu</span>
       </button>
       <span class="top-app-bar__title font-headline">Admin Dashboard</span>
-      <div id="syncStatus"
-        style="font-size:0.55rem;font-weight:900;letter-spacing:0.08em;padding:0.2rem 0.5rem;border-radius:2rem;transition:all 0.3s;display:flex;align-items:center;gap:0.25rem;box-shadow:inset 0 1px 1px rgba(0,0,0,0.05);">
+      <div id="syncStatus" style="font-size:0.55rem;font-weight:900;letter-spacing:0.08em;padding:0.2rem 0.5rem;border-radius:2rem;transition:all 0.3s;display:flex;align-items:center;gap:0.25rem;box-shadow:inset 0 1px 1px rgba(0,0,0,0.05);">
         <!-- Status injected by JS -->
       </div>
-      <div id="backendStatus"
-        onclick="window._reconnectBackend && window._reconnectBackend()"
-        title="Click to reconnect server"
-        style="font-size:0.55rem;font-weight:900;letter-spacing:0.08em;padding:0.2rem 0.5rem;border-radius:2rem;transition:all 0.3s;display:flex;align-items:center;gap:0.25rem;box-shadow:inset 0 1px 1px rgba(0,0,0,0.05);margin-left:0.25rem;cursor:pointer;">
-        <!-- Backend Status injected by JS -->
+      <!-- Render Cache Indicator -->
+      <style>
+        @media (max-width: 600px) {
+          #headerRenderStatusText { display: none; }
+          #headerRenderStatus { padding: 0.35rem !important; border-radius: 50% !important; aspect-ratio: 1; justify-content: center; }
+        }
+      </style>
+      <div id="headerRenderStatus" style="font-size:0.55rem;font-weight:900;letter-spacing:0.08em;padding:0.2rem 0.5rem;border-radius:2rem;transition:all 0.3s;display:flex;align-items:center;gap:0.25rem;background:#fee2e2;color:#991b1b;box-shadow:inset 0 1px 1px rgba(0,0,0,0.05);">
+        <span class="material-symbols-outlined" style="font-size:0.75rem;">dns</span>
+        <span id="headerRenderStatusText">API OFF</span>
       </div>
     </div>
     <div class="top-app-bar__actions">
-      <button class="icon-btn"
-        onclick="if(window.handleManualRefresh) { window.handleManualRefresh(); } else { KwabzStore.refreshAll(); }"
-        title="Refresh Sync">
+      <button class="icon-btn" onclick="if(window.handleManualRefresh) { window.handleManualRefresh(); } else { KwabzStore.refreshAll(); }" title="Refresh Sync">
         <span class="material-symbols-outlined">sync</span>
       </button>
-      <button class="icon-btn" onclick="KwabzStore.adminLogout().then(() => window.location.href='admin-login.html');"
-        title="Logout">
+      <button id="desktopLogoutBtn" class="icon-btn" onclick="KwabzStore.adminLogout().then(() => window.location.href='admin-login.html');" title="Logout">
         <span class="material-symbols-outlined">logout</span>
       </button>
     </div>
@@ -47,11 +85,23 @@
 
   <!-- ═══ Side Drawer ═══ -->
   <div class="modal-overlay" id="adminDrawer" onclick="if(event.target===this) this.classList.remove('open')">
-    <div class="modal-content"
-      style="position:fixed;left:0;top:0;height:100%;width:20rem;max-width:80vw;border-radius:0 var(--radius-xl) var(--radius-xl) 0;transform:translateX(-100%);display:flex;flex-direction:column;padding:2rem;">
+    <div class="modal-content" style="position:fixed;left:0;top:0;height:100%;width:20rem;max-width:80vw;border-radius:0 var(--radius-xl) var(--radius-xl) 0;transform:translateX(-100%);display:flex;flex-direction:column;padding:2rem;">
       <div style="margin-bottom:3rem;">
         <h2 class="font-headline"
-          style="font-weight:900;font-size:1.125rem;letter-spacing:-0.04em;text-transform:uppercase;">Kwabz Store</h2>
+          style="font-weight:900;font-size:1.125rem;letter-spacing:-0.04em;text-transform:uppercase;">
+          <script>
+            (function () {
+              try {
+                const cached = JSON.parse(localStorage.getItem('kwabz_settings') || '{}');
+                const theme = cached.theme || {};
+                const logoText = theme.logoText || 'Kwabz Store';
+                document.write(logoText);
+              } catch (e) {
+                document.write('Kwabz Store');
+              }
+            })();
+          </script>
+        </h2>
         <p class="text-label-sm" style="color:var(--outline);">Student-Life Commerce</p>
       </div>
       <nav style="flex:1;display:flex;flex-direction:column;gap:0.25rem;overflow-y:auto;">
@@ -60,15 +110,21 @@
           <span class="material-symbols-outlined">admin_panel_settings</span>
           Dashboard
         </a>
-        <a href="admin-widget.html"
-          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
-          <span class="material-symbols-outlined">monitoring</span>
-          Live Widget
-        </a>
+
         <a href="admin-products.html"
           style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
           <span class="material-symbols-outlined">inventory_2</span>
           Inventory
+        </a>
+        <a href="admin-status.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">chat</span>
+          WhatsApp Status
+        </a>
+        <a href="admin-chat.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">support_agent</span>
+          Customer Support
         </a>
         <a href="admin-orders.html"
           style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
@@ -79,6 +135,21 @@
           style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
           <span class="material-symbols-outlined">category</span>
           Categories
+        </a>
+        <a href="admin-bundles.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">wifi</span>
+          Data Bundles
+        </a>
+        <a href="admin-promo.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">percentage</span>
+          Promo Codes
+        </a>
+        <a href="admin-blog.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">book</span>
+          Journal Posts
         </a>
         <a href="admin-sellers.html"
           style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
@@ -105,6 +176,26 @@
           <span class="material-symbols-outlined">group</span>
           Admin Team
         </a>
+        <a href="admin-wallet.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">account_balance_wallet</span>
+          Wallet Ledger
+        </a>
+        <a href="admin-feedback.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">rate_review</span>
+          Feedback Portal
+        </a>
+        <a href="admin-food.html"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">restaurant</span>
+          Kwabz Eat
+        </a>
+        <a href="kwabz_architecture_book.html" target="_blank"
+          style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
+          <span class="material-symbols-outlined">menu_book</span>
+          System Architecture
+        </a>
         <hr style="margin:0.5rem 0; border:none; border-top:1px solid var(--outline-variant);" />
         <a href="shop.html"
           style="display:flex;align-items:center;gap:1rem;padding:0.875rem 1rem;border-radius:var(--radius-lg);font-family:var(--font-headline);font-size:0.875rem;font-weight:600;color:var(--secondary);">
@@ -127,10 +218,10 @@
     <!-- Stats Grid -->
     <section style="margin-bottom:3rem;">
       <h2 class="section-header">Store Overview</h2>
-      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:1rem;">
+      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:0.75rem;">
         <!-- Products -->
         <a href="admin-products.html" class="stat-card"
-          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid var(--primary); transition:transform 0.2s; cursor:pointer;">
+          style="display:block; text-decoration:none; color:inherit; padding:1.25rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid var(--primary); transition:transform 0.2s; cursor:pointer;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
             <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">inventory_2</span>
           </div>
@@ -139,7 +230,7 @@
         </a>
         <!-- Categories -->
         <a href="admin-categories.html" class="stat-card"
-          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+          style="display:block; text-decoration:none; color:inherit; padding:1.25rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
             <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">category</span>
           </div>
@@ -148,7 +239,7 @@
         </a>
         <!-- Orders -->
         <a href="admin-orders.html" class="stat-card"
-          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+          style="display:block; text-decoration:none; color:inherit; padding:1.25rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
             <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">receipt_long</span>
           </div>
@@ -157,7 +248,7 @@
         </a>
         <!-- Sellers -->
         <a href="admin-sellers.html" class="stat-card"
-          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+          style="display:block; text-decoration:none; color:inherit; padding:1.25rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
             <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">storefront</span>
           </div>
@@ -166,7 +257,7 @@
         </a>
         <!-- Seller Sales -->
         <a href="admin-diagnostics.html" class="stat-card"
-          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+          style="display:block; text-decoration:none; color:inherit; padding:1.25rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
             <span class="material-symbols-outlined" style="color:var(--secondary); font-size:1.25rem;">payments</span>
           </div>
@@ -174,8 +265,8 @@
           <p class="stat-card__label" style="font-size:0.625rem;">3RD PARTY COMMISSIONS</p>
         </a>
         <!-- Users -->
-        <a href="admin-users.html" class="stat-card"
-          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
+        <a href="admin-live-users.html" class="stat-card"
+          style="display:block; text-decoration:none; color:inherit; padding:1.25rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); transition:transform 0.2s; cursor:pointer;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
             <span class="material-symbols-outlined" style="color:var(--outline); font-size:1.25rem;">group</span>
           </div>
@@ -184,30 +275,64 @@
         </a>
         <!-- Active Admins -->
         <a href="admin-users.html" class="stat-card"
-          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid #10b981; transition:transform 0.2s; cursor:pointer;">
+          style="display:block; text-decoration:none; color:inherit; padding:1.25rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid #10b981; transition:transform 0.2s; cursor:pointer;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
             <span class="material-symbols-outlined" style="color:#10b981; font-size:1.25rem;">sensors</span>
           </div>
           <p id="statActiveAdmins" class="stat-card__value" style="font-size:1.75rem;">0</p>
           <p class="stat-card__label" style="font-size:0.625rem;">ACTIVE ADMINS</p>
         </a>
+        </a>
+
+        <!-- Render API Cache Stats -->
+        <div class="stat-card"
+          style="display:flex; flex-direction:column; grid-column:1 / -1; text-decoration:none; color:inherit; padding:1.25rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid #8b5cf6; transition:transform 0.2s;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+            <span class="material-symbols-outlined" style="color:#8b5cf6; font-size:1.25rem;">memory</span>
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+              <span id="redisIndicator" style="display:inline-flex; align-items:center; gap:0.25rem; font-size:0.5rem; padding:0.15rem 0.4rem; border-radius:1rem; background:rgba(16,185,129,0.1); color:#10b981; border:1px solid rgba(16,185,129,0.2); opacity:0; transition:opacity 0.3s;">
+                <span style="width:4px; height:4px; background:#10b981; border-radius:50%; box-shadow:0 0 4px #10b981;"></span> REDIS ACTIVE
+              </span>
+              <span style="font-size:0.625rem; font-weight:700; color:#8b5cf6; letter-spacing:0.05em;">HYBRID CACHE</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:1.5rem; align-items:baseline; margin-top:auto;">
+            <div>
+              <p id="statCacheProducts" class="stat-card__value" style="font-size:1.5rem; line-height:1;">0</p>
+              <p style="font-size:0.55rem; color:var(--outline); font-weight:700;">PRODUCTS</p>
+            </div>
+            <div>
+              <p id="statCacheCategories" class="stat-card__value" style="font-size:1.5rem; line-height:1;">0</p>
+              <p style="font-size:0.55rem; color:var(--outline); font-weight:700;">CATEGORIES</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Reviews -->
-        <div onclick="openReviewsSheet()" class="stat-card"
-          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid #eab308; transition:transform 0.2s; cursor:pointer;">
+        <a href="admin-reviews.html" class="stat-card"
+          style="display:block; grid-column:1 / -1; text-decoration:none; color:inherit; padding:1.25rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid #eab308; transition:transform 0.2s; cursor:pointer;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
             <span class="material-symbols-outlined" style="color:#eab308; font-size:1.25rem;">rate_review</span>
           </div>
           <p id="statReviews" class="stat-card__value" style="font-size:1.75rem;">0</p>
           <p class="stat-card__label" style="font-size:0.625rem;">PRODUCT REVIEWS</p>
-        </div>
-        <!-- FB Reads -->
-        <div class="stat-card"
-          style="display:block; text-decoration:none; color:inherit; padding:1.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-xl); border-bottom:3px solid #6fcf97; transition:transform 0.2s;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
-            <span class="material-symbols-outlined" style="color:#6fcf97; font-size:1.25rem;">database</span>
-          </div>
-          <p id="statReads" class="stat-card__value" style="font-size:1.75rem;">0</p>
-          <p class="stat-card__label" style="font-size:0.625rem;">FB READS (TODAY)</p>
+        </a>
+      </div>
+    </section>
+
+    <!-- Live Operations Map -->
+    <section style="margin-bottom:3rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+        <h2 class="section-header" style="display:flex;align-items:center;gap:0.5rem;margin:0;"><span class="material-symbols-outlined" style="color:var(--primary);">map</span> Live Order Status</h2>
+        <button type="button" id="adminMapToggleBtn" onclick="toggleAdminMapFull()" style="background:var(--surface-container-high); border:1px solid var(--outline-variant); color:var(--on-surface); border-radius:var(--radius-full); width:32px; height:32px; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s ease;">
+          <span class="material-symbols-outlined" style="font-size:1.1rem;">fullscreen</span>
+        </button>
+      </div>
+      <div id="adminLiveMapContainer" style="background:var(--surface-container-lowest); border:1px solid var(--outline-variant); border-radius:var(--radius-xl); overflow:hidden; box-shadow:var(--shadow-ambient); transition:all 0.3s ease;">
+        <div id="adminLiveMap" style="height: 350px; width: 100%; z-index: 1;"></div>
+        <div style="padding:0.75rem 1rem; font-size:0.75rem; color:var(--outline); display:flex; justify-content:space-between; align-items:center; background:var(--surface-container-high);">
+          <span>Live tracking coordinates</span>
+          <span style="display:flex;align-items:center;gap:0.25rem;"><span class="live-dot"></span> Live Sync</span>
         </div>
       </div>
     </section>
@@ -230,13 +355,40 @@
           <span class="font-headline"
             style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">SELLERS</span>
         </a>
-
         <!-- Manage Categories -->
         <a href="admin-categories.html" class="action-tile"
           style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
           <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">category</span>
           <span class="font-headline"
             style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">CATEGORIES</span>
+        </a>
+        <!-- Manage Bundles -->
+        <a href="admin-bundles.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">wifi</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">DATA BUNDLES</span>
+        </a>
+        <!-- Manage Promo Codes -->
+        <a href="admin-promo.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">percentage</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">PROMO CODES</span>
+        </a>
+        <!-- Manage Journal/Blog -->
+        <a href="admin-blog.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">book</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">JOURNAL / BLOG</span>
+        </a>
+        <!-- Blog Hero Settings -->
+        <a href="admin-theme.html?tab=blog" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">image</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">BLOG HERO IMAGE</span>
         </a>
         <!-- Theme Settings -->
         <a href="admin-theme.html" class="action-tile"
@@ -268,6 +420,13 @@
           <span class="font-headline"
             style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">BILLING SHEET</span>
         </a>
+        <!-- Wallet Ledger -->
+        <a href="admin-wallet.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">account_balance_wallet</span>
+          <span class="font-headline"
+            style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">WALLET LEDGER</span>
+        </a>
         <!-- Generate QR Code -->
         <div onclick="showQrModal()" class="action-tile"
           style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl); cursor:pointer;">
@@ -276,13 +435,229 @@
             style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">STORE QR
             CODE</span>
         </div>
-        <!-- Live Widget -->
-        <a href="admin-widget.html" class="action-tile"
-          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:linear-gradient(135deg, #09090b, #18181b); color:white; border:1px solid rgba(255,255,255,0.08); border-radius:var(--radius-xl); box-shadow:0 8px 24px rgba(0,0,0,0.12);">
-          <span class="material-symbols-outlined" style="color:#0ea5e9; font-size:1.75rem;">monitoring</span>
-          <span class="font-headline" style="font-weight:700; font-size:0.875rem; letter-spacing:-0.01em;">LIVE
-            WIDGET</span>
+
+                <!-- WhatsApp Status Publisher -->
+        <a href="admin-status.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:linear-gradient(135deg, #0f172a, #047857); color:white; border:1px solid rgba(255,255,255,0.08); border-radius:var(--radius-xl); box-shadow:0 8px 24px rgba(4,120,87,0.12);">
+          <span class="material-symbols-outlined" style="color:#25d366; font-size:1.75rem;">chat</span>
+          <span class="font-headline" style="font-weight:700; font-size:0.875rem; letter-spacing:-0.01em;">WHATSAPP
+            STATUS</span>
         </a>
+        <!-- System Architecture Blueprint -->
+        <a href="kwabz_architecture_book.html" target="_blank" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:linear-gradient(135deg, #1e293b, #0f172a); color:white; border:1px solid rgba(255,255,255,0.08); border-radius:var(--radius-xl); box-shadow:0 8px 24px rgba(0,0,0,0.15);">
+          <span class="material-symbols-outlined" style="color:#fbbf24; font-size:1.75rem;">menu_book</span>
+          <span class="font-headline" style="font-weight:700; font-size:0.875rem; letter-spacing:-0.01em;">SYSTEM
+            BLUEPRINT</span>
+        </a>
+        <!-- Customer Support Chat -->
+        <a href="admin-chat.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:linear-gradient(135deg, var(--primary), #1d4ed8); color:white; border-radius:var(--radius-xl); box-shadow:0 8px 24px rgba(37,99,235,0.15);">
+          <span class="material-symbols-outlined" style="font-size:1.75rem;">support_agent</span>
+          <span class="font-headline" style="font-weight:700; font-size:0.875rem; letter-spacing:-0.01em;">SUPPORT CHATS</span>
+        </a>
+         <!-- Customer Questionnaire -->
+        <a href="admin-feedback.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:linear-gradient(135deg, #7c3aed, var(--primary)); color:white; border-radius:var(--radius-xl); box-shadow:0 8px 24px rgba(124,58,237,0.15);">
+          <span class="material-symbols-outlined" style="font-size:1.75rem;">rate_review</span>
+          <span class="font-headline" style="font-weight:700; font-size:0.875rem; letter-spacing:-0.01em;">QUESTIONNAIRE</span>
+        </a>
+        <!-- Kwabz Eat -->
+        <a href="admin-food.html" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:linear-gradient(135deg, #e11d48, #be123c); color:white; border-radius:var(--radius-xl); box-shadow:0 8px 24px rgba(225,29,72,0.15);">
+          <span class="material-symbols-outlined" style="font-size:1.75rem;">restaurant</span>
+          <span class="font-headline" style="font-weight:700; font-size:0.875rem; letter-spacing:-0.01em;">KWABZ EAT</span>
+        </a>
+        <!-- Event Organizer Dashboard -->
+        <a href="organizer-dashboard.html" class="action-tile" target="_blank"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:linear-gradient(135deg, #f59e0b, #d97706); color:white; border-radius:var(--radius-xl); box-shadow:0 8px 24px rgba(245,158,11,0.15);">
+          <span class="material-symbols-outlined" style="font-size:1.75rem;">event</span>
+          <span class="font-headline" style="font-weight:700; font-size:0.875rem; letter-spacing:-0.01em;">EVENT DASHBOARD</span>
+        </a>
+        <!-- Share Event Store -->
+        <button onclick="navigator.clipboard.writeText(window.location.origin + '/events.html').then(()=>alert('Event Store Link Copied!'))" class="action-tile"
+          style="display:flex; flex-direction:column; gap:1rem; padding:1.25rem; background:white; border:1px solid var(--outline-variant); border-radius:var(--radius-xl); text-align:left; cursor:pointer;">
+          <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.75rem;">share</span>
+          <span class="font-headline" style="font-weight:700; font-size:0.875rem; color:var(--on-surface); letter-spacing:-0.01em;">SHARE EVENTS</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- WhatsApp Automation Bot Control Center -->
+    <section style="margin-bottom:3rem;">
+      <h2 class="section-header" style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;">
+        <span style="display:flex;align-items:center;gap:0.5rem;">
+          <span class="material-symbols-outlined" style="color:#25d366;font-size:1.5rem;">chat</span>
+          WhatsApp Order Bot & Accounts
+        </span>
+        <button onclick="addNewBotAccount()" class="btn-primary" style="width:auto;padding:0.5rem 1rem;font-size:0.75rem;border-radius:var(--radius-lg);display:flex;align-items:center;gap:0.25rem;background:#0284c7;border-color:#0284c7;font-weight:700;cursor:pointer;">
+          <span class="material-symbols-outlined" style="font-size:1rem;">add</span>
+          Add WhatsApp Account
+        </button>
+      </h2>
+      <div class="card card--flat" style="padding:1.5rem;background:var(--surface-container-high);display:flex;flex-direction:column;gap:1.25rem;">
+        
+        <!-- Grid container for all WhatsApp Bot Accounts -->
+        <div id="botAccountsContainer" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));gap:1.25rem;">
+          <!-- Loaded dynamically via attachBotAccountsListener -->
+        </div>
+
+        <!-- Collapsible Configuration Hub -->
+        <hr style="border:0; border-top:1px solid var(--outline-variant); margin:0.5rem 0;" />
+        
+        <details style="background:var(--surface-container-lowest); border-radius:var(--radius-xl); border:1px solid var(--outline-variant); padding:0.75rem 1rem;">
+          <summary style="font-weight:800; font-size:0.8125rem; color:var(--on-surface); cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; gap:0.5rem; user-select:none;">
+            <span style="display:flex; align-items:center; gap:0.4rem; flex:1;">
+              <span class="material-symbols-outlined" style="color:var(--primary); font-size:1.125rem;">settings_suggest</span>
+              Bot Settings & Customization Hub
+            </span>
+            <span class="material-symbols-outlined" style="font-size:1.125rem; transition:transform 0.2s;" id="botSettingsChevron">expand_more</span>
+          </summary>
+          
+          <div style="display:flex; flex-direction:column; gap:1.25rem; margin-top:1.25rem; animation:fadeIn 0.2s ease;">
+            <!-- Mode Toggle Row -->
+            <div>
+              <label style="font-weight:700; font-size:0.75rem; color:var(--outline); display:block; margin-bottom:0.4rem;">BOT RESPONDER MODE</label>
+              <div style="display:flex; gap:0.5rem;">
+                <button type="button" id="btnModeBusiness" onclick="setBotConfigField('mode', 'business')" style="flex:1; padding:0.625rem; border-radius:var(--radius-md); font-weight:700; font-size:0.75rem; border:1px solid var(--outline-variant); background:var(--surface-container-high); color:var(--on-surface); transition:all 0.2s; cursor:pointer;">
+                  💼 Business Mode
+                </button>
+                <button type="button" id="btnModePersonal" onclick="setBotConfigField('mode', 'personal')" style="flex:1; padding:0.625rem; border-radius:var(--radius-md); font-weight:700; font-size:0.75rem; border:1px solid var(--outline-variant); background:var(--surface-container-high); color:var(--on-surface); transition:all 0.2s; cursor:pointer;">
+                  👤 Personal Mode
+                </button>
+              </div>
+              <p style="font-size:0.6875rem; color:var(--outline); margin:0.3rem 0 0; line-height:1.3;">
+                <b>Business Mode</b> activates the interactive menu responder. <b>Personal Mode</b> silences direct chat replies completely so you can chat normally.
+            </div>
+            
+            <!-- Personal Mode Custom Autoreply message (User Requested) -->
+            <div id="cfgPersonalMessageContainer" style="display:none; transition:all 0.3s ease; background:rgba(2, 132, 199, 0.05); border:1px dashed #0284c7; padding:0.75rem; border-radius:var(--radius-lg);">
+              <label style="font-weight:700; font-size:0.75rem; color:#0284c7; display:block; margin-bottom:0.25rem;">PERSONAL MODE AUTO-REPLY MESSAGE</label>
+              <textarea id="cfgPersonalMessage" onchange="saveBotTextConfig()" rows="2" style="width:100%; padding:0.5rem; border-radius:var(--radius-md); border:1px solid rgba(2, 132, 199, 0.3); background:var(--surface-container-high); color:var(--on-surface); font-size:0.75rem; resize:vertical; font-family:inherit;" placeholder="👋 Hello! Our automated assistant is currently offline. Please leave your message here..."></textarea>
+              <p style="font-size:0.65rem; color:#0284c7; margin:0.25rem 0 0; line-height:1.3;">
+                This message will be sent exactly <b>once per customer session</b> when they greet or trigger the bot in Personal Mode.
+              </p>
+            </div>
+
+            <!-- Custom Messages Column -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem;">
+              <div>
+                <label style="font-weight:700; font-size:0.75rem; color:var(--outline); display:block; margin-bottom:0.25rem;">STORE BRAND NAME</label>
+                <input type="text" id="cfgStoreName" onchange="saveBotTextConfig()" style="width:100%; padding:0.5rem; border-radius:var(--radius-md); border:1px solid var(--outline-variant); background:var(--surface-container-high); color:var(--on-surface); font-size:0.75rem;" />
+              </div>
+              <div>
+                <label style="font-weight:700; font-size:0.75rem; color:var(--outline); display:block; margin-bottom:0.25rem;">WORKING HOURS</label>
+                <input type="text" id="cfgWorkingHours" onchange="saveBotTextConfig()" style="width:100%; padding:0.5rem; border-radius:var(--radius-md); border:1px solid var(--outline-variant); background:var(--surface-container-high); color:var(--on-surface); font-size:0.75rem;" />
+              </div>
+            </div>
+
+            <div>
+              <label style="font-weight:700; font-size:0.75rem; color:var(--outline); display:block; margin-bottom:0.25rem;">WELCOME MESSAGE</label>
+              <textarea id="cfgWelcomeMessage" onchange="saveBotTextConfig()" rows="2" style="width:100%; padding:0.5rem; border-radius:var(--radius-md); border:1px solid var(--outline-variant); background:var(--surface-container-high); color:var(--on-surface); font-size:0.75rem; resize:vertical; font-family:inherit;"></textarea>
+            </div>
+
+            <div>
+              <label style="font-weight:700; font-size:0.75rem; color:var(--outline); display:block; margin-bottom:0.25rem;">SUPPORT MESSAGE DETAIL</label>
+              <textarea id="cfgSupportMessage" onchange="saveBotTextConfig()" rows="2" style="width:100%; padding:0.5rem; border-radius:var(--radius-md); border:1px solid var(--outline-variant); background:var(--surface-container-high); color:var(--on-surface); font-size:0.75rem; resize:vertical; font-family:inherit;"></textarea>
+            </div>
+
+            <!-- Robo Chat Assistant Quick Options Customizer -->
+            <div style="border-top:1px solid var(--outline-variant); padding-top:1rem; display:flex; flex-direction:column; gap:0.75rem;">
+              <label style="font-weight:700; font-size:0.75rem; color:var(--outline); display:block;">ROBO ASSISTANT QUICK OPTIONS</label>
+              
+              <div style="display:flex; flex-direction:column; gap:0.5rem;" id="roboAssistantQuickOptionsList">
+                <!-- Loaded dynamically -->
+              </div>
+
+              <!-- Add/Edit Option Form (Inline) -->
+              <div id="roboAssistantOptionForm" style="display:none; flex-direction:column; gap:0.75rem; background:var(--surface-container-high); padding:0.75rem; border-radius:var(--radius-lg); border:1px solid rgba(148, 163, 184, 0.25); margin-top:0.5rem; animation:slideDown 0.2s ease;">
+                <input type="hidden" id="roboOptionEditIndex" value="" />
+                <div>
+                  <label style="font-weight:700; font-size:0.65rem; color:var(--outline); display:block; margin-bottom:0.25rem;">OPTION LABEL</label>
+                  <input type="text" id="newRoboOptionLabel" placeholder="e.g. 📶 Network Status" style="width:100%; padding:0.5rem; border-radius:var(--radius-md); border:1px solid rgba(148, 163, 184, 0.25); background:var(--surface-container-lowest); color:var(--on-surface); font-size:0.75rem;" />
+                </div>
+                <div>
+                  <label style="font-weight:700; font-size:0.65rem; color:var(--outline); display:block; margin-bottom:0.25rem;">AUTOMATED REPLY MESSAGE</label>
+                  <textarea id="newRoboOptionReply" rows="3" placeholder="Automated reply message (Markdown allowed)..." style="width:100%; padding:0.5rem; border-radius:var(--radius-md); border:1px solid rgba(148, 163, 184, 0.25); background:var(--surface-container-lowest); color:var(--on-surface); font-size:0.75rem; resize:vertical; font-family:inherit;"></textarea>
+                </div>
+                <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+                  <button type="button" onclick="cancelRoboOptionEdit()" class="btn-secondary" style="width:auto; padding:0.4rem 0.8rem; font-size:0.7rem; border-radius:var(--radius-md);">Cancel</button>
+                  <button type="button" onclick="saveRoboOption()" class="btn-primary" style="width:auto; padding:0.4rem 0.8rem; font-size:0.7rem; border-radius:var(--radius-md);">Save Option</button>
+                </div>
+              </div>
+
+              <!-- Add New Button -->
+              <button type="button" id="btnAddRoboOption" onclick="showAddRoboOption()" class="btn-secondary" style="width:100%; padding:0.5rem; font-size:0.75rem; border-radius:var(--radius-md); display:flex; align-items:center; justify-content:center; gap:0.25rem; font-weight:700; border-style:dashed;">
+                <span class="material-symbols-outlined" style="font-size:0.95rem;">add</span> Add Custom Quick Action
+              </button>
+            </div>
+
+            <!-- Seller Notifications Settings -->
+            <div style="border-top:1px solid var(--outline-variant); padding-top:1rem;">
+              <label style="font-weight:700; font-size:0.75rem; color:var(--outline); display:block; margin-bottom:0.5rem;">CO-SELLER OR BRANCH WHATSAPP ALERTS</label>
+              
+              <div style="display:flex; flex-direction:column; gap:0.5rem; margin-bottom:0.75rem;" id="cfgSellerAssignmentsList">
+                <!-- Dynamically Rendered Assignments -->
+              </div>
+
+              <!-- Add New Assignment Row -->
+              <div style="display:flex; flex-wrap:wrap; gap:0.5rem; background:var(--surface-container-high); padding:0.75rem; border-radius:var(--radius-lg); border:1px solid rgba(148, 163, 184, 0.25);">
+                <select id="newAssignSeller" style="flex:1; min-width:130px; padding:0.5rem; border-radius:var(--radius-md); border:1px solid rgba(148, 163, 184, 0.25); background:var(--surface-container-lowest); color:var(--on-surface); font-size:0.75rem; cursor:pointer;">
+                  <option value="">Select Seller / Branch...</option>
+                  <option value="all">All Sellers (Broadcaster)</option>
+                </select>
+                <input type="text" id="newAssignName" placeholder="Name/Label" style="width:100px; padding:0.5rem; border-radius:var(--radius-md); border:1px solid rgba(148, 163, 184, 0.25); background:var(--surface-container-lowest); color:var(--on-surface); font-size:0.75rem;" />
+                <input type="tel" id="newAssignPhone" placeholder="WhatsApp (e.g. 233...)" style="flex:1.2; min-width:140px; padding:0.5rem; border-radius:var(--radius-md); border:1px solid rgba(148, 163, 184, 0.25); background:var(--surface-container-lowest); color:var(--on-surface); font-size:0.75rem;" />
+                <button type="button" onclick="addSellerAssignment()" class="btn-primary" style="width:auto; padding:0.5rem 1rem; font-size:0.75rem; border-radius:var(--radius-md); display:flex; align-items:center; gap:0.25rem;">
+                  <span class="material-symbols-outlined" style="font-size:0.875rem;">add</span> Add
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </details>
+
+      </div>
+    </section>
+
+    <!-- Seller Activation PINs -->
+    <section style="margin-bottom:3rem;">
+      <h2 class="section-header">Seller Ecosystem Hub</h2>
+      <div class="card card--flat" style="padding:1.5rem;background:var(--surface-container-high);display:flex;flex-direction:column;gap:1.25rem;">
+        
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
+            <p style="font-weight:700;font-size:0.875rem;margin-bottom:0.15rem;display:flex;align-items:center;gap:0.4rem;">
+              <span class="material-symbols-outlined" style="color:var(--primary);font-size:1.125rem;">key</span>
+              Seller Activation PINs
+            </p>
+            <p class="text-body-sm" style="color:var(--outline);font-size:0.75rem;">
+              Manage activation PINs for new sellers. Pending PINs requested via the WhatsApp Bot appear here for approval.
+            </p>
+          </div>
+          <button onclick="generateSellerPin()" class="btn-primary" style="width:auto;padding:0.625rem 1rem;font-size:0.75rem;border-radius:var(--radius-lg);display:flex;align-items:center;gap:0.25rem;flex-shrink:0;">
+            <span class="material-symbols-outlined" style="font-size:0.875rem;">add_circle</span>
+            Generate PIN
+          </button>
+        </div>
+
+        <div style="overflow-x:auto; background:var(--surface-container-lowest); border:1px solid var(--outline-variant); border-radius:var(--radius-xl);">
+          <table style="width:100%; border-collapse:collapse; min-width:600px;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--outline-variant); background:var(--surface-container-high);">
+                <th style="padding:0.75rem 1rem; text-align:left; font-size:0.625rem; color:var(--outline); font-weight:700;">PIN CODE</th>
+                <th style="padding:0.75rem 1rem; text-align:left; font-size:0.625rem; color:var(--outline); font-weight:700;">TYPE</th>
+                <th style="padding:0.75rem 1rem; text-align:left; font-size:0.625rem; color:var(--outline); font-weight:700;">STATUS</th>
+                <th style="padding:0.75rem 1rem; text-align:left; font-size:0.625rem; color:var(--outline); font-weight:700;">REQUESTED BY</th>
+                <th style="padding:0.75rem 1rem; text-align:left; font-size:0.625rem; color:var(--outline); font-weight:700;">DATE</th>
+                <th style="padding:0.75rem 1rem; text-align:right; font-size:0.625rem; color:var(--outline); font-weight:700;">ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody id="sellerPinsTableBody">
+              <tr><td colspan="6" id="sellerPinsLoadingCell" style="padding:1.5rem;text-align:center;color:var(--outline);font-size:0.75rem;">Loading PINs...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -336,6 +711,75 @@
             Duration a product remains tagged as "NEW" after creation.
           </p>
         </div>
+        <div class="form-group" style="margin-top:1.5rem;">
+          <label class="form-group__label">Admin WhatsApp Support Number</label>
+          <div style="display:flex;gap:0.75rem;margin-top:0.5rem;">
+            <input type="tel" id="whatsappSupportNumberInput" class="minimal-input"
+              style="flex:1;border-radius:var(--radius-lg);background:var(--surface-container-lowest);"
+              placeholder="e.g. 233240000000" />
+            <button onclick="saveStoreSettings()" class="btn-primary" style="width:auto;padding:0 1.5rem;">Save</button>
+          </div>
+          <p class="text-body-sm" style="color:var(--outline);margin-top:0.75rem;">
+            This number receives "Push to Admin" messages from sellers during activation.
+          </p>
+        </div>
+        <div class="form-group" style="margin-top:1.5rem;">
+          <label class="form-group__label">Seller Free Trial Duration (Days)</label>
+          <div style="display:flex;gap:0.75rem;margin-top:0.5rem;">
+            <input type="number" id="sellerTrialDurationInput" class="minimal-input"
+              style="flex:1;border-radius:var(--radius-lg);background:var(--surface-container-lowest);"
+              placeholder="e.g. 14" />
+            <button onclick="saveStoreSettings()" class="btn-primary" style="width:auto;padding:0 1.5rem;">Save</button>
+          </div>
+          <p class="text-body-sm" style="color:var(--outline);margin-top:0.75rem;">
+            Number of free trial days before the monthly subscription cycle begins. Set to 0 to start counting from creation date.
+          </p>
+        </div>
+
+        <!-- ─── Force PWA Update Banner ─── -->
+        <div class="form-group" style="margin-top:1.5rem;border-top:1px dashed var(--outline-variant);padding-top:1.5rem;">
+          <label class="form-group__label" style="display:flex;align-items:center;gap:0.4rem;">
+            <span class="material-symbols-outlined" style="font-size:1.1rem;color:var(--primary);">sync</span>
+            Force PWA Update Banner
+          </label>
+          <p class="text-body-sm" style="color:var(--outline);margin:0.5rem 0 0.75rem;line-height:1.5;">
+            Toggle this banner for all users to force-update the app, ensuring their browsers download all fresh assets and stay synchronized with the latest deployment commit.
+          </p>
+          <div style="display:flex;align-items:center;gap:1rem;">
+            <select id="forcePwaUpdateSelect" class="minimal-input" style="flex:1;border-radius:var(--radius-lg);background:var(--surface-container-lowest);font-family:inherit;font-size:0.875rem;" onchange="toggleForcePwaUpdateBanner()">
+              <option value="disabled">Disabled (No Banner)</option>
+              <option value="enabled">Enabled (Force Update Prompt)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- ─── Delivery Notice Banner ─────────────────────────── -->
+        <div class="form-group" style="margin-top:1.5rem;border-top:1px dashed var(--outline-variant);padding-top:1.5rem;">
+          <label class="form-group__label" style="display:flex;align-items:center;gap:0.4rem;">
+            <span class="material-symbols-outlined" style="font-size:1.1rem;color:#10b981;">local_shipping</span>
+            Product Page Delivery Notice
+          </label>
+          <p class="text-body-sm" style="color:var(--outline);margin:0.5rem 0 0.75rem;line-height:1.5;">
+            This notice appears on every product page between the info cards and the reviews section. Use it to communicate delivery zones, fees, and policies. HTML tags like <code style="background:var(--surface-container-high);padding:0.1rem 0.3rem;border-radius:4px;">&lt;strong&gt;</code> are supported.
+          </p>
+
+          <!-- Current Notice Preview -->
+          <div id="deliveryNoticePreview" style="display:none;background:linear-gradient(135deg,rgba(16,185,129,0.08),rgba(16,185,129,0.03));border:1.5px solid rgba(16,185,129,0.25);padding:1rem 1.25rem;border-radius:var(--radius-xl);margin-bottom:1rem;font-size:0.8125rem;color:var(--on-surface-variant);line-height:1.55;">
+          </div>
+
+          <textarea id="deliveryNoticeInput" class="minimal-input" rows="4"
+            style="width:100%;border-radius:var(--radius-lg);background:var(--surface-container-lowest);resize:vertical;font-family:inherit;font-size:0.875rem;line-height:1.5;box-sizing:border-box;"
+            placeholder="e.g. 🎓 Deliveries to &lt;strong&gt;Legon Campus are FREE&lt;/strong&gt;. Orders outside Accra or to other regions will be &lt;strong&gt;charged separately&lt;/strong&gt; — the admin will confirm the delivery fee upon order confirmation."></textarea>
+
+          <div style="display:flex;gap:0.75rem;margin-top:0.75rem;">
+            <button onclick="saveDeliveryNotice()" class="btn-primary" style="width:auto;padding:0 1.5rem;display:flex;align-items:center;gap:0.4rem;">
+              <span class="material-symbols-outlined" style="font-size:1rem;">save</span> Save Notice
+            </button>
+            <button onclick="deleteDeliveryNotice()" class="btn-secondary" style="width:auto;padding:0 1.25rem;display:flex;align-items:center;gap:0.4rem;color:#b91c1c;border-color:#fecaca;background:#fef2f2;">
+              <span class="material-symbols-outlined" style="font-size:1rem;">delete</span> Delete
+            </button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -361,6 +805,25 @@
     </section>
 
   </main>
+
+  <!-- ═══ Live Users Sheet ═══ -->
+  <div id="liveUsersSheetOverlay" class="modal-overlay" onclick="if(event.target===this) closeLiveUsersSheet()"
+    style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:200; align-items:flex-end; justify-content:center;">
+    <div class="modal-content"
+      style="background:var(--surface-container-lowest); border-radius:2rem 2rem 0 0; width:100%; max-width:600px; max-height:85dvh; overflow-y:auto; padding:1.5rem 1.5rem 3rem; animation:slideUp 0.35s cubic-bezier(0.16,1,0.3,1); text-align:left;">
+      <div style="width:3rem; height:4px; background:var(--outline-variant); border-radius:2px; margin:0 auto 1.5rem;"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+        <div>
+          <h2 class="font-headline" style="font-weight:800;font-size:1.25rem;">Live Users</h2>
+          <p class="text-label-sm" style="color:var(--outline); margin-top:0.25rem;">Real-time active visitors</p>
+        </div>
+        <button onclick="closeLiveUsersSheet()" class="icon-btn" style="background:var(--surface-container-high);"><span class="material-symbols-outlined">close</span></button>
+      </div>
+      <div id="liveUsersList" style="display:flex; flex-direction:column; gap:0.75rem;">
+        <div style="text-align:center; padding:2rem; color:var(--outline);">Loading active users...</div>
+      </div>
+    </div>
+  </div>
 
   <!-- ═══ Admin Reviews Sheet ═══ -->
   <div id="reviewsAdminSheetOverlay" class="modal-overlay" onclick="if(event.target===this) closeReviewsSheet()"
@@ -475,10 +938,88 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <script src="store.js?v=2.4.9"></script>
-  <script src="utils.js?v=2.4.9"></script>
-  <script type="module" src="shell.js?v=2.4.9"></script>
+  <script src="store.js"></script>
+  <script src="utils.js"></script>
+  <script type="module" src="shell.js"></script>
   <script>
+
+// ─── GLOBALLY EXPOSED LIVE USERS METHODS ───
+// ─── Live Users Sheet ───
+      function openLiveUsersSheet() {
+        try {
+          const el = document.getElementById('liveUsersSheetOverlay');
+          if (!el) { alert('Overlay not found!'); return; }
+          el.style.display = 'flex';
+          renderLiveUsers();
+        } catch(e) {
+          alert('Error opening sheet: ' + e.message);
+        }
+      }
+
+      function closeLiveUsersSheet() {
+        document.getElementById('liveUsersSheetOverlay').style.display = 'none';
+      }
+
+      async function renderLiveUsers() {
+        const listEl = document.getElementById('liveUsersList');
+        listEl.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--outline);">Loading active users...</div>';
+        
+        try {
+          const url = (window.RENDER_API_BASE || 'https://nodejs-backend-1-ucbq.onrender.com') + '/api/visitors/detailed';
+          const res = await fetch(url);
+          const data = await res.json();
+          
+          if (!data.visitors || data.visitors.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center; padding:2rem; color:var(--outline);">No active users online right now.</div>';
+            return;
+          }
+
+          // Sort by most recently active
+          data.visitors.sort((a, b) => b.lastActive - a.lastActive);
+
+          listEl.innerHTML = data.visitors.map(v => {
+            const isGuest = !v.uid;
+            const name = v.displayName || (isGuest ? 'Guest User' : 'Registered User');
+            const page = v.page || 'index.html';
+            
+            // Calculate minutes online (time since last heartbeat)
+            const msAgo = Date.now() - v.lastActive;
+            const minsAgo = Math.floor(msAgo / 60000);
+            const timeText = minsAgo < 1 ? 'Just now' : `${minsAgo}m ago`;
+            
+            // Highlight color
+            const avatarColor = isGuest ? 'var(--outline)' : 'var(--primary)';
+            const icon = isGuest ? 'person' : 'verified_user';
+
+            return `
+              <div style="display:flex; align-items:center; gap:1rem; padding:1rem; background:var(--surface-container); border-radius:var(--radius-lg);">
+                <div style="width:2.5rem; height:2.5rem; border-radius:50%; background:var(--surface-container-high); display:flex; align-items:center; justify-content:center; color:${avatarColor}; flex-shrink:0;">
+                  <span class="material-symbols-outlined" style="font-size:1.25rem;">${icon}</span>
+                </div>
+                <div style="flex:1; overflow:hidden;">
+                  <div style="font-weight:700; font-size:0.875rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    ${name}
+                  </div>
+                  <div style="font-size:0.75rem; color:var(--outline); margin-top:0.25rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display: flex; align-items: center; gap: 4px;">
+                    <span class="material-symbols-outlined" style="font-size:14px; color:#10b981;">explore</span> ${page}
+                  </div>
+                </div>
+                <div style="text-align:right; flex-shrink:0;">
+                  <div style="font-size:0.75rem; font-weight:700;">${timeText}</div>
+                  <div style="font-size:0.65rem; color:var(--outline); margin-top:0.25rem;">Active</div>
+                </div>
+              </div>
+            `;
+          }).join('');
+        } catch (e) {
+          listEl.innerHTML = '<div style="text-align:center; padding:2rem; color:#ef4444;">Failed to load live users.</div>';
+        }
+      }
+
+      
+window.openLiveUsersSheet = openLiveUsersSheet;
+window.closeLiveUsersSheet = closeLiveUsersSheet;
+
     // ─── Store-ready deferred execution ──────────────────────────────────────────
     // shell.js is type=module so it runs AFTER all inline scripts.
     // We must wait for KwabzStore to emit 'store_initialized' before registering
@@ -505,6 +1046,21 @@
         console.warn('[Kwabz Ready] requireAdmin check failed. Redirecting to admin-login.html...');
         return;
       }
+
+      // Populate settings inputs
+      const settings = KwabzStore.getSettings() || {};
+      const tagInput = document.getElementById('newTagDurationInput');
+      if (tagInput && settings.newTagDuration !== undefined) tagInput.value = settings.newTagDuration;
+      const waInput = document.getElementById('whatsappSupportNumberInput');
+      if (waInput && settings.whatsappSupportNumber !== undefined) waInput.value = settings.whatsappSupportNumber;
+      const trialInput = document.getElementById('sellerTrialDurationInput');
+      if (trialInput && settings.sellerTrialDuration !== undefined) trialInput.value = settings.sellerTrialDuration;
+      const pwaUpdateSelect = document.getElementById('forcePwaUpdateSelect');
+      if (pwaUpdateSelect && settings.forcePwaUpdate !== undefined) {
+        pwaUpdateSelect.value = settings.forcePwaUpdate ? 'enabled' : 'disabled';
+      }
+      // Populate delivery notice
+      _populateDeliveryNotice(settings);
 
       // Shared tracking variable to capture outcome of manual force sync (Goal 4)
       let manualSyncInProgress = false;
@@ -537,9 +1093,32 @@
       };
 
       // ─── Sync Badge ────────────────────────────────────────────
+      let _syncBadgeDebounce = null;
+      let _lastConfirmedOnline = 0;
+      const OFFLINE_GRACE_MS = 5000; // Wait 5s before showing OFFLINE after being LIVE
+
       function updateSyncBadge(status, errMsg) {
+        // Debounce: cancel any pending update first
+        if (_syncBadgeDebounce) { clearTimeout(_syncBadgeDebounce); _syncBadgeDebounce = null; }
+
+        // If we just went offline but were recently online, delay showing it
+        if (status === 'offline' && (Date.now() - _lastConfirmedOnline) < OFFLINE_GRACE_MS) {
+          _syncBadgeDebounce = setTimeout(() => _applyBadge('offline', errMsg), OFFLINE_GRACE_MS);
+          return;
+        }
+        // 'syncing' → short debounce (don't flash it for <500ms transitions)
+        if (status === 'syncing') {
+          _syncBadgeDebounce = setTimeout(() => _applyBadge('syncing', errMsg), 400);
+          return;
+        }
+        _applyBadge(status, errMsg);
+      }
+
+      function _applyBadge(status, errMsg) {
         const badge = document.getElementById('syncStatus');
         if (!badge) return;
+
+        if (status === 'online') _lastConfirmedOnline = Date.now();
 
         // Remove existing error container if present
         const oldBox = document.getElementById('syncErrorBox');
@@ -547,8 +1126,8 @@
 
         const states = {
           syncing: { text: 'SYNCING', color: 'var(--primary)', bg: 'var(--surface-container-highest)', icon: 'sync' },
-          online: { text: 'LIVE', color: '#166534', bg: '#dcfce7', icon: 'database' },
-          offline: { text: 'OFFLINE', color: 'var(--outline)', bg: 'var(--surface-container-high)', icon: 'cloud_off' }
+          online:  { text: 'LIVE',    color: '#166534',        bg: '#dcfce7',                          icon: 'database' },
+          offline: { text: 'OFFLINE', color: 'var(--outline)', bg: 'var(--surface-container-high)',    icon: 'cloud_off' }
         };
         const s = states[status] || states.offline;
         badge.style.color = s.color;
@@ -578,21 +1157,6 @@
         }
       }
 
-      // ─── Backend Server Status Badge ───────────────────────────
-      function updateBackendBadge(status) {
-        const badge = document.getElementById('backendStatus');
-        if (!badge) return;
-
-        const states = {
-          online: { text: 'SERVER: ONLINE', color: '#166534', bg: '#dcfce7', icon: 'dns' },
-          offline: { text: 'SERVER: OFFLINE', color: '#b91c1c', bg: '#fee2e2', icon: 'dns' }
-        };
-        const s = states[status] || states.offline;
-        badge.style.color = s.color;
-        badge.style.background = s.bg;
-        badge.innerHTML = `<span class="material-symbols-outlined" style="font-size:0.875rem;">${s.icon}</span> ${s.text}`;
-      }
-
       const style = document.createElement('style');
       style.textContent = `@keyframes hubSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } .loading-spin-anim { animation: hubSpin 2s linear infinite; }`;
       document.head.appendChild(style);
@@ -600,9 +1164,6 @@
       // Update badge immediately and on every change
       updateSyncBadge(KwabzStore.getSyncStatus());
       KwabzStore.on('sync_status', (s, err) => updateSyncBadge(s, err));
-
-      updateBackendBadge(KwabzStore.getBackendStatus ? KwabzStore.getBackendStatus() : 'offline');
-      KwabzStore.on('backend_status', (status) => updateBackendBadge(status));
 
       // ─── Settings ──────────────────────────────────────────────
       function initSettings() {
@@ -615,6 +1176,10 @@
       KwabzStore.on('settings_changed', (s) => {
         const theme = (s && s.theme) ? s.theme : s;
         if (typeof KwabzUtils.applyGlobalTheme === 'function') KwabzUtils.applyGlobalTheme(theme);
+        const pwaUpdateSelect = document.getElementById('forcePwaUpdateSelect');
+        if (pwaUpdateSelect && s && s.forcePwaUpdate !== undefined) {
+          pwaUpdateSelect.value = s.forcePwaUpdate ? 'enabled' : 'disabled';
+        }
       });
 
       // ─── Dashboard Render ──────────────────────────────────────
@@ -642,6 +1207,14 @@
           const isMiniStore = order.seller_id && order.seller_id !== 'main';
           const sellerText = isMiniStore ? ` • <span style="font-weight:700;color:var(--primary);background:var(--surface-container-high);padding:0.05rem 0.35rem;border-radius:4px;font-size:0.65rem;">${order.seller_name || 'Mini-Store'}</span>` : '';
           const commText = (isMiniStore && typeof order.admin_commission === 'number') ? ` • <span style="font-weight:700;color:#166534;font-size:0.6875rem;">Comm: +${KwabzUtils.formatPrice(order.admin_commission)}</span>` : '';
+          const promoText = (order.promo_code && order.promo_discount && order.promo_discount > 0)
+            ? ` • <span style="font-weight:700;color:#b91c1c;font-size:0.6875rem;">Promo: ${order.promo_code} -${KwabzUtils.formatPrice(order.promo_discount)}</span>`
+            : '';
+          const paymentText = order.order_method === 'wallet'
+            ? ` • <span style="font-weight:700;color:#10b981;background:rgba(16,185,129,0.1);padding:0.05rem 0.35rem;border-radius:4px;font-size:0.65rem;">Wallet</span>`
+            : (order.order_method === 'bundle'
+                ? ` • <span style="font-weight:700;color:#d97706;background:rgba(234,179,8,0.1);padding:0.05rem 0.35rem;border-radius:4px;font-size:0.65rem;">MoMo</span>`
+                : ` • <span style="font-weight:700;color:var(--outline);background:var(--surface-container-high);padding:0.05rem 0.35rem;border-radius:4px;font-size:0.65rem;">Pay on Delivery</span>`);
           return `
           <div class="activity-row">
             <div style="display:flex;align-items:center;gap:1.5rem;">
@@ -651,7 +1224,7 @@
               <div>
                 <p class="font-headline" style="font-weight:700;font-size:0.875rem;">${order.order_label || order.order_number || ''}</p>
                 <p style="font-size:0.75rem;color:var(--outline);font-weight:500;display:flex;align-items:center;gap:0.25rem;flex-wrap:wrap;">
-                  ${order.customer?.name || 'Guest'} • <span>${KwabzUtils.formatPrice(order.total_price || 0)}</span>${sellerText}${commText}
+                  ${order.customer?.name || 'Guest'} • <span>${KwabzUtils.formatPrice(order.total_price || 0)}</span>${paymentText}${sellerText}${commText}${promoText}
                 </p>
               </div>
             </div>
@@ -662,15 +1235,30 @@
       }
 
       async function saveStoreSettings() {
-        const input = document.getElementById('newTagDurationInput');
-        if (!input) return;
-        const duration = parseInt(input.value);
-        if (isNaN(duration) || duration < 0) {
-          KwabzUtils.toast('Please enter a valid number of days', 'error');
-          return;
+        const durationInput = document.getElementById('newTagDurationInput');
+        const phoneInput = document.getElementById('whatsappSupportNumberInput');
+        const trialInput = document.getElementById('sellerTrialDurationInput');
+        
+        let updates = {};
+        
+        if (durationInput && durationInput.value !== '') {
+          const duration = parseInt(durationInput.value);
+          if (!isNaN(duration) && duration >= 0) updates.newTagDuration = duration;
         }
+
+        if (phoneInput && phoneInput.value !== '') {
+          updates.whatsappSupportNumber = phoneInput.value.trim();
+        }
+
+        if (trialInput && trialInput.value !== '') {
+          const trial = parseInt(trialInput.value);
+          if (!isNaN(trial) && trial >= 0) updates.sellerTrialDuration = trial;
+        }
+        
+        if (Object.keys(updates).length === 0) return;
+
         try {
-          await KwabzStore.updateSettings({ newTagDuration: duration });
+          await KwabzStore.updateSettings(updates);
           KwabzUtils.toast('Settings updated and synced to cloud');
         } catch (err) {
           KwabzUtils.toast('Failed to update settings', 'error');
@@ -678,6 +1266,68 @@
       }
       // Expose saveStoreSettings globally for onclick handler
       window.saveStoreSettings = saveStoreSettings;
+
+      async function toggleForcePwaUpdateBanner() {
+        const select = document.getElementById('forcePwaUpdateSelect');
+        if (!select) return;
+        const isEnabled = select.value === 'enabled';
+        try {
+          await KwabzStore.updateSettings({ 
+            forcePwaUpdate: isEnabled,
+            pwaUpdateTimestamp: isEnabled ? Date.now() : null
+          });
+          KwabzUtils.toast(`PWA Update Banner set to: ${isEnabled ? 'ENABLED' : 'DISABLED'}`, 'success');
+        } catch (err) {
+          KwabzUtils.toast('Failed to update PWA Update Banner setting', 'error');
+        }
+      }
+      window.toggleForcePwaUpdateBanner = toggleForcePwaUpdateBanner;
+
+      // ─── Delivery Notice Management ─────────────────────────────
+      function _populateDeliveryNotice(s) {
+        const input = document.getElementById('deliveryNoticeInput');
+        const preview = document.getElementById('deliveryNoticePreview');
+        const src = s || KwabzStore.getSettings() || {};
+        if (input) input.value = (src.deliveryNotice || '').trim();
+        if (preview) {
+          const text = (src.deliveryNotice || '').trim();
+          if (text) {
+            preview.innerHTML = text;
+            preview.style.display = 'block';
+          } else {
+            preview.style.display = 'none';
+          }
+        }
+      }
+
+      async function saveDeliveryNotice() {
+        const input = document.getElementById('deliveryNoticeInput');
+        if (!input) return;
+        const text = input.value.trim();
+        try {
+          await KwabzStore.updateSettings({ deliveryNotice: text });
+          KwabzUtils.toast('✅ Delivery notice saved and live on all product pages');
+          _populateDeliveryNotice();
+        } catch (err) {
+          KwabzUtils.toast('Failed to save delivery notice', 'error');
+        }
+      }
+
+      async function deleteDeliveryNotice() {
+        if (!confirm('Remove the delivery notice from all product pages?')) return;
+        const input = document.getElementById('deliveryNoticeInput');
+        if (input) input.value = '';
+        try {
+          await KwabzStore.updateSettings({ deliveryNotice: '' });
+          KwabzUtils.toast('🗑️ Delivery notice removed');
+          _populateDeliveryNotice();
+        } catch (err) {
+          KwabzUtils.toast('Failed to delete delivery notice', 'error');
+        }
+      }
+
+      window.saveDeliveryNotice = saveDeliveryNotice;
+      window.deleteDeliveryNotice = deleteDeliveryNotice;
 
       // ─── QR Code Modal ─────────────────────────────────────────
       function showQrModal() {
@@ -1196,6 +1846,8 @@
 
       // Expose to window
       window.openReviewsSheet = openReviewsSheet;
+      
+      
       window.closeReviewsSheet = closeReviewsSheet;
       window.deleteReviewByAdmin = deleteReviewByAdmin;
 
@@ -1248,11 +1900,6 @@
         const commEl = document.getElementById('statSellerSales');
         if (commEl) commEl.textContent = KwabzUtils.formatPrice(sellerCommissions);
 
-        const todayKey = 'kwabz_fb_reads_' + new Date().toISOString().slice(0, 10);
-        const reads = parseInt(localStorage.getItem(todayKey) || '0', 10);
-        const elReads = document.getElementById('statReads');
-        if (elReads) elReads.textContent = reads.toLocaleString();
-
         renderRecentOrders();
       }
 
@@ -1260,7 +1907,44 @@
       // Render immediately with any cached data available right now
       renderDashboard();
 
-
+      // Ping Render API Health
+      function pingRenderServer() {
+        const url = (window.RENDER_API_BASE || 'https://nodejs-backend-1-ucbq.onrender.com') + '/api/health';
+        fetch(url)
+          .then(res => res.json())
+          .then(data => {
+            const hStatus = document.getElementById('headerRenderStatus');
+            const hText = document.getElementById('headerRenderStatusText');
+            if (hStatus && hText) {
+              if (data.status === 'healthy') {
+                hStatus.style.background = '#dcfce7';
+                hStatus.style.color = '#166534';
+                hText.textContent = 'API CACHE';
+              } else {
+                hStatus.style.background = '#fef08a';
+                hStatus.style.color = '#854d0e';
+                hText.textContent = 'API DEGRADED';
+              }
+            }
+            
+            // Populate Cache Card
+            const elProd = document.getElementById('statCacheProducts');
+            const elCat = document.getElementById('statCacheCategories');
+            if (elProd && data.cacheSizes) elProd.textContent = data.cacheSizes.products || 0;
+            if (elCat && data.cacheSizes) elCat.textContent = data.cacheSizes.categories || 0;
+          })
+          .catch(() => {
+            const hStatus = document.getElementById('headerRenderStatus');
+            const hText = document.getElementById('headerRenderStatusText');
+            if (hStatus && hText) {
+              hStatus.style.background = '#fee2e2';
+              hStatus.style.color = '#991b1b';
+              hText.textContent = 'API OFF';
+            }
+          });
+      }
+      pingRenderServer();
+      setInterval(pingRenderServer, 10000); // Check every 10 seconds
 
       // ─── Data listeners (Debounced for performance) ──────────
       const debouncedRender = KwabzUtils.debounce(() => {
@@ -1270,13 +1954,6 @@
 
       KwabzStore.on('products_changed', debouncedRender);
       KwabzStore.on('categories_changed', debouncedRender);
-
-      KwabzStore.on('firestore_read', () => {
-        const todayKey = 'kwabz_fb_reads_' + new Date().toISOString().slice(0, 10);
-        const reads = parseInt(localStorage.getItem(todayKey) || '0', 10);
-        const elReads = document.getElementById('statReads');
-        if (elReads) elReads.textContent = reads.toLocaleString();
-      });
       let previousOrders = null;
       KwabzStore.on('orders_changed', (orders) => {
         console.log('[Dashboard Event] orders_changed received. Count:', orders ? orders.length : 0);
@@ -1341,11 +2018,1051 @@
         }).catch(() => { });
       }
 
+      // ─── WhatsApp Bot Controller Logic ───
+      function updateBotStatusUI(data) {
+        const dot = document.getElementById('botStatusDot');
+        const text = document.getElementById('botStatusText');
+        const desc = document.getElementById('botStatusDesc');
+        const startBtn = document.getElementById('startBotBtn');
+        const stopBtn = document.getElementById('stopBotBtn');
+        const qrContainer = document.getElementById('botQrContainer');
+        const qrImage = document.getElementById('botQrImage');
+        const infoContainer = document.getElementById('botInfoContainer');
+        const activeName = document.getElementById('botActiveName');
+        const activePhone = document.getElementById('botActivePhone');
+
+        if (!dot || !text || !desc) return;
+
+        const status = data.status || 'offline';
+        console.log(`[Dashboard] Received WhatsApp Bot state: "${status}"`);
+
+        // Reset dynamic styles
+        dot.style.animation = 'none';
+
+        if (status === 'offline') {
+          dot.style.backgroundColor = '#ef4444';
+          dot.style.boxShadow = '0 0 8px #ef4444';
+          text.textContent = 'OFFLINE';
+          text.style.color = 'var(--outline)';
+          desc.textContent = 'Bot process is disconnected. Toggle "Connect Bot" to initialize connection.';
+          
+          startBtn.style.display = 'flex';
+          startBtn.disabled = false;
+          startBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:0.875rem;">play_arrow</span> Connect Bot';
+          
+          stopBtn.style.display = 'none';
+          qrContainer.style.display = 'none';
+          infoContainer.style.display = 'none';
+        } 
+        else if (status === 'starting' || status === 'stopping') {
+          dot.style.backgroundColor = '#eab308';
+          dot.style.boxShadow = '0 0 8px #eab308';
+          dot.style.animation = 'pulse 1.5s infinite';
+          
+          text.textContent = status === 'starting' ? 'CONNECTING...' : 'DISCONNECTING...';
+          text.style.color = '#eab308';
+          
+          const percent = data.percent !== null && data.percent !== undefined ? ` (${data.percent}%)` : '';
+          const msg = data.message ? `: ${data.message}` : '';
+          desc.textContent = status === 'starting' 
+            ? `Initializing Chrome driver and WhatsApp engine${percent}${msg}...` 
+            : 'Shutting down connection and cleaning up in-memory sessions...';
+          
+          startBtn.style.display = 'flex';
+          startBtn.disabled = true;
+          startBtn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;margin-right:0.25rem;"></span> Wait...';
+          
+          stopBtn.style.display = 'none';
+          qrContainer.style.display = 'none';
+          infoContainer.style.display = 'none';
+        }
+        else if (status === 'scanning') {
+          dot.style.backgroundColor = '#eab308';
+          dot.style.boxShadow = '0 0 8px #eab308';
+          dot.style.animation = 'pulse 1.5s infinite';
+          
+          text.textContent = 'PAIRING REQUIRED';
+          text.style.color = '#eab308';
+          desc.textContent = 'WhatsApp is awaiting authentication scan. Scan the code below with your phone.';
+          
+          startBtn.style.display = 'none';
+          stopBtn.style.display = 'flex';
+          
+          if (data.qr) {
+            qrContainer.style.display = 'flex';
+            qrImage.src = data.qr;
+          } else {
+            qrContainer.style.display = 'none';
+          }
+          infoContainer.style.display = 'none';
+        }
+        else if (status === 'authenticated') {
+          dot.style.backgroundColor = '#10b981';
+          dot.style.boxShadow = '0 0 8px #10b981';
+          dot.style.animation = 'pulse 1.5s infinite';
+          
+          text.textContent = 'AUTHENTICATED';
+          text.style.color = '#10b981';
+          desc.textContent = 'Pairing successful! Verifying server channels and launching watcher...';
+          
+          startBtn.style.display = 'none';
+          stopBtn.style.display = 'flex';
+          qrContainer.style.display = 'none';
+          infoContainer.style.display = 'none';
+        }
+        else if (status === 'online') {
+          dot.style.backgroundColor = '#10b981';
+          dot.style.boxShadow = '0 0 8px #10b981';
+          
+          text.textContent = 'ACTIVE & ONLINE';
+          text.style.color = '#10b981';
+          desc.textContent = 'Order automation running successfully. Monitoring collections for new customer orders in real-time.';
+          
+          startBtn.style.display = 'none';
+          stopBtn.style.display = 'flex';
+          qrContainer.style.display = 'none';
+          
+          infoContainer.style.display = 'flex';
+          if (data.info) {
+            activeName.textContent = data.info.pushname || 'Admin WhatsApp Account';
+            activePhone.textContent = `🟢 Connected WID: +${data.info.wid || 'N/A'}`;
+          }
+        }
+        else if (status === 'error') {
+          dot.style.backgroundColor = '#ef4444';
+          dot.style.boxShadow = '0 0 8px #ef4444';
+          
+          text.textContent = 'CONNECTION ERROR';
+          text.style.color = '#ef4444';
+          desc.textContent = `Error: ${data.error || 'Unknown initialization failure'}. Please disconnect and try again.`;
+          
+          startBtn.style.display = 'flex';
+          startBtn.disabled = false;
+          startBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:0.875rem;">refresh</span> Retry Connection';
+          
+          stopBtn.style.display = 'flex';
+          qrContainer.style.display = 'none';
+          infoContainer.style.display = 'none';
+        }
+      }
+
+      async function toggleBotState(action) {
+        try {
+          if (action === 'start') {
+            KwabzUtils.toast('🚀 Dispatching startup command to bot server...', 'info');
+          } else {
+            KwabzUtils.toast('⏹️ Dispatching shutdown command to bot server...', 'info');
+          }
+          await firebase.firestore().collection('settings').doc('whatsapp_bot_controls').set({
+            action: action,
+            triggered_at: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          KwabzUtils.toast('Control action failed: ' + err.message, 'error');
+        }
+      }
+
+      window.toggleBotState = toggleBotState;
+
+      // ─── WhatsApp Bot Settings Configuration Logic (Goal 1 & 2 & 3) ───
+      let botConfigData = {};
+      let configAttached = false;
+
+      const defaultQuickActions = [
+        { id: 'status', label: '📶 Network Status', reply: "📶 *Network Status Notice:*\nMTN Ghana & Telecel Ghana bundle credit services are fully **ACTIVE**. Average delivery time is 5-15 minutes." },
+        { id: 'timeline', label: '⏱️ Delivery Time', reply: "⏱️ *Delivery Time Info:*\nBundles are processed manually by the Admin. Once you confirm your order on WhatsApp and send payment confirmation, the transfer will be credited within **5 to 15 minutes**." },
+        { id: 'wrong_number', label: '⚠️ Refund Policy', reply: "⚠️ *Refund / Incorrect Number Policy:*\nOnce internet bundle credit is initiated to a phone number, it cannot be reversed. Please **always double-check the target number** before confirming payment on WhatsApp." },
+        { id: 'admin', label: '👤 Chat with Admin', reply: "👤 *Chat with Admin:*\nIf you have a specific request, please type your message below. The Admin will get a notice and respond directly in this chat! You can also reach the admin directly on WhatsApp." }
+      ];
+
+      function renderRoboOptionsList(list) {
+        const container = document.getElementById('roboAssistantQuickOptionsList');
+        if (!container) return;
+
+        if (list.length === 0) {
+          container.innerHTML = `
+            <div style="font-size:0.7rem; color:var(--outline); text-align:center; padding:0.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-md); border:1px dashed var(--outline-variant);">
+              No quick action replies set. Add one below to customize robo options.
+            </div>
+          `;
+          return;
+        }
+
+        let html = '';
+        list.forEach((item, index) => {
+          html += `
+            <div style="display:flex; flex-direction:column; gap:0.25rem; background:var(--surface-container-lowest); padding:0.75rem; border-radius:var(--radius-md); border:1px solid var(--outline-variant); font-size:0.75rem; animation:slideDown 0.2s ease;">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+                <p style="margin:0; font-weight:700; color:var(--on-surface);">
+                  ${item.label} <span style="font-size:0.6rem; color:var(--outline); font-weight:normal;">(ID: ${item.id})</span>
+                </p>
+                <div style="display:flex; gap:0.25rem;">
+                  <button type="button" onclick="editRoboOption(${index})" style="color:var(--primary); width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:transparent; border:none; cursor:pointer; transition:background 0.2s;">
+                    <span class="material-symbols-outlined" style="font-size:1.125rem;">edit</span>
+                  </button>
+                  <button type="button" onclick="deleteRoboOption(${index})" style="color:#ef4444; width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:transparent; border:none; cursor:pointer; transition:background 0.2s;">
+                    <span class="material-symbols-outlined" style="font-size:1.125rem;">delete</span>
+                  </button>
+                </div>
+              </div>
+              <p style="margin:0.25rem 0 0; font-size:0.7rem; color:var(--outline); white-space:pre-wrap; line-height:1.4; max-height:80px; overflow-y:auto; background:var(--surface-container-low); padding:0.4rem; border-radius:var(--radius-sm);">
+                ${item.reply}
+              </p>
+            </div>
+          `;
+        });
+        container.innerHTML = html;
+      }
+
+      function showAddRoboOption(index = null) {
+        const form = document.getElementById('roboAssistantOptionForm');
+        const idxInput = document.getElementById('roboOptionEditIndex');
+        const labelInput = document.getElementById('newRoboOptionLabel');
+        const replyInput = document.getElementById('newRoboOptionReply');
+        const btnAdd = document.getElementById('btnAddRoboOption');
+
+        if (!form || !idxInput || !labelInput || !replyInput || !btnAdd) return;
+
+        if (index !== null) {
+          const currentList = botConfigData.roboAssistantQuickActions || [...defaultQuickActions];
+          const item = currentList[index];
+          if (item) {
+            idxInput.value = index;
+            labelInput.value = item.label || '';
+            replyInput.value = item.reply || '';
+          }
+        } else {
+          idxInput.value = '';
+          labelInput.value = '';
+          replyInput.value = '';
+        }
+
+        form.style.display = 'flex';
+        btnAdd.style.display = 'none';
+        labelInput.focus();
+      }
+
+      function cancelRoboOptionEdit() {
+        const form = document.getElementById('roboAssistantOptionForm');
+        const btnAdd = document.getElementById('btnAddRoboOption');
+        if (form) form.style.display = 'none';
+        if (btnAdd) btnAdd.style.display = 'flex';
+      }
+
+      async function saveRoboOption() {
+        const idxInput = document.getElementById('roboOptionEditIndex');
+        const labelInput = document.getElementById('newRoboOptionLabel');
+        const replyInput = document.getElementById('newRoboOptionReply');
+
+        if (!idxInput || !labelInput || !replyInput) return;
+
+        const indexVal = idxInput.value;
+        const label = labelInput.value.trim();
+        const reply = replyInput.value.trim();
+
+        if (!label) {
+          KwabzUtils.toast('Please enter an option label.', 'warning');
+          return;
+        }
+        if (!reply) {
+          KwabzUtils.toast('Please enter an automated reply message.', 'warning');
+          return;
+        }
+
+        const currentList = botConfigData.roboAssistantQuickActions || [...defaultQuickActions];
+        let updatedList;
+
+        if (indexVal !== '') {
+          // Editing existing
+          const idx = parseInt(indexVal, 10);
+          updatedList = currentList.map((item, i) => {
+            if (i === idx) {
+              return { ...item, label, reply };
+            }
+            return item;
+          });
+        } else {
+          // Adding new: generate simple unique ID based on label characters
+          const id = 'opt_' + label.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 15) + '_' + Math.floor(Math.random() * 1000);
+          updatedList = [...currentList, { id, label, reply }];
+        }
+
+        try {
+          await firebase.firestore().collection('settings').doc('whatsapp_bot_config').update({
+            roboAssistantQuickActions: updatedList
+          });
+          KwabzUtils.toast('✨ Robo Quick Options saved successfully!', 'success');
+          cancelRoboOptionEdit();
+        } catch (err) {
+          KwabzUtils.toast('Failed to save robo option: ' + err.message, 'error');
+        }
+      }
+
+      async function deleteRoboOption(index) {
+        if (!confirm('Are you sure you want to delete this robo quick option?')) return;
+        const currentList = botConfigData.roboAssistantQuickActions || [...defaultQuickActions];
+        const updatedList = currentList.filter((_, idx) => idx !== index);
+        try {
+          await firebase.firestore().collection('settings').doc('whatsapp_bot_config').update({
+            roboAssistantQuickActions: updatedList
+          });
+          KwabzUtils.toast('🗑️ Robo Option deleted successfully.', 'success');
+        } catch (err) {
+          KwabzUtils.toast('Failed to delete option: ' + err.message, 'error');
+        }
+      }
+
+      window.renderRoboOptionsList = renderRoboOptionsList;
+      window.showAddRoboOption = showAddRoboOption;
+      window.cancelRoboOptionEdit = cancelRoboOptionEdit;
+      window.saveRoboOption = saveRoboOption;
+      window.deleteRoboOption = deleteRoboOption;
+      window.editRoboOption = showAddRoboOption; // Alias for edit
+
+      async function loadSellersDropdown() {
+        const select = document.getElementById('newAssignSeller');
+        if (!select) return;
+        try {
+          // OPTIMIZED: Use the local store cache to completely eliminate this full collection read
+          const sellers = (typeof KwabzStore !== 'undefined') ? KwabzStore.getSellers() : [];
+          select.innerHTML = `
+            <option value="">Select Seller / Branch...</option>
+            <option value="all">All Sellers (Broadcaster)</option>
+          `;
+          sellers.forEach(s => {
+            const option = document.createElement('option');
+            option.value = s.id;
+            option.textContent = s.name || s.store_name || s.id;
+            select.appendChild(option);
+          });
+          console.log('[Dashboard] Sellers populated in WhatsApp config dropdown successfully.');
+        } catch (err) {
+          console.warn('Failed to load sellers collection:', err);
+        }
+      }
+
+      function attachBotConfigListener() {
+        if (configAttached) return;
+        configAttached = true;
+        
+        console.log('[Dashboard] Attaching WhatsApp Bot configuration watcher...');
+        loadSellersDropdown();
+        
+        firebase.firestore().collection('settings').doc('whatsapp_bot_config')
+          .onSnapshot(snap => {
+            if (!snap.exists) {
+              // Write initial default document if missing
+              firebase.firestore().collection('settings').doc('whatsapp_bot_config').set({
+                mode: 'business',
+                store_name: 'Kwabz Store',
+                working_hours: 'Mon - Sat (8:00 AM - 9:00 PM)',
+                welcome_message: 'Hi! 🤖 I am your Kwabz Bundle assistant. Let me know if you need help or have any questions about internet data bundles.\n\nSelect one of the quick options below or send a custom message directly to the Admin support channel!',
+                support_message: "Need direct help? We've got you covered!",
+                personal_mode_message: "👋 Hello! Our automated assistant is currently offline. Please leave your message here, and the admin will respond to you personally very soon!",
+                seller_assignments: []
+              });
+              return;
+            }
+            
+            const data = snap.data();
+            botConfigData = data;
+            updateBotConfigUI(data);
+          }, err => {
+            console.error('Config watcher error:', err);
+          });
+      }
+
+      function updateBotConfigUI(data) {
+        // Toggle mode buttons state styling
+        const mode = data.mode || 'business';
+        const btnBusiness = document.getElementById('btnModeBusiness');
+        const btnPersonal = document.getElementById('btnModePersonal');
+        
+        // Show/hide personal message configuration box based on mode
+        const personalContainer = document.getElementById('cfgPersonalMessageContainer');
+        if (personalContainer) {
+          personalContainer.style.display = mode === 'personal' ? 'block' : 'none';
+        }
+        
+        if (btnBusiness && btnPersonal) {
+          if (mode === 'business') {
+            btnBusiness.style.background = 'var(--primary)';
+            btnBusiness.style.color = 'var(--on-primary)';
+            btnBusiness.style.borderColor = 'var(--primary)';
+            
+            btnPersonal.style.background = 'var(--surface-container-high)';
+            btnPersonal.style.color = 'var(--on-surface)';
+            btnPersonal.style.borderColor = 'var(--outline-variant)';
+          } else {
+            btnPersonal.style.background = '#0284c7'; // sleek blue for personal mode
+            btnPersonal.style.color = 'white';
+            btnPersonal.style.borderColor = '#0284c7';
+            
+            btnBusiness.style.background = 'var(--surface-container-high)';
+            btnBusiness.style.color = 'var(--on-surface)';
+            btnBusiness.style.borderColor = 'var(--outline-variant)';
+          }
+        }
+        
+        // Populate text inputs/textareas if they are not currently active/focused
+        const storeName = document.getElementById('cfgStoreName');
+        const hours = document.getElementById('cfgWorkingHours');
+        const welcome = document.getElementById('cfgWelcomeMessage');
+        const support = document.getElementById('cfgSupportMessage');
+        const personal = document.getElementById('cfgPersonalMessage');
+        
+        if (storeName && document.activeElement !== storeName) storeName.value = data.store_name || '';
+        if (hours && document.activeElement !== hours) hours.value = data.working_hours || '';
+        if (welcome && document.activeElement !== welcome) welcome.value = data.welcome_message || '';
+        if (support && document.activeElement !== support) support.value = data.support_message || '';
+        if (personal && document.activeElement !== personal) personal.value = data.personal_mode_message || '';
+        
+        // Render assignments list
+        renderAssignmentsList(data.seller_assignments || []);
+        
+        // Render quick actions list
+        renderRoboOptionsList(data.roboAssistantQuickActions || [...defaultQuickActions]);
+      }
+
+      function renderAssignmentsList(list) {
+        const container = document.getElementById('cfgSellerAssignmentsList');
+        if (!container) return;
+        
+        if (list.length === 0) {
+          container.innerHTML = `
+            <div style="font-size:0.7rem; color:var(--outline); text-align:center; padding:0.5rem; background:var(--surface-container-lowest); border-radius:var(--radius-md); border:1px dashed var(--outline-variant);">
+              No co-seller assignments yet. Add one below to route notifications.
+            </div>
+          `;
+          return;
+        }
+        
+        let html = '';
+        list.forEach((item, index) => {
+          const sellerLabel = item.seller_id === 'all' ? '📢 All Sellers' : `🏪 ID: ${item.seller_id}`;
+          html += `
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem; background:var(--surface-container-lowest); padding:0.5rem 0.75rem; border-radius:var(--radius-md); border:1px solid var(--outline-variant); font-size:0.75rem; animation:slideDown 0.2s ease;">
+              <div style="flex:1; min-width:0;">
+                <p style="margin:0; font-weight:700; color:var(--on-surface); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
+                  ${item.name || 'Branch'} (${sellerLabel})
+                </p>
+                <p style="margin:0.1rem 0 0; font-size:0.65rem; color:var(--outline);">
+                  🟢 Phone: +${item.phone}
+                </p>
+              </div>
+              <button type="button" onclick="removeSellerAssignment(${index})" style="color:#ef4444; width:28px; height:28px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:transparent; border:none; cursor:pointer; transition:background 0.2s;">
+                <span class="material-symbols-outlined" style="font-size:1.125rem;">delete</span>
+              </button>
+            </div>
+          `;
+        });
+        container.innerHTML = html;
+      }
+
+      async function setBotConfigField(field, value) {
+        try {
+          await firebase.firestore().collection('settings').doc('whatsapp_bot_config').update({
+            [field]: value
+          });
+          KwabzUtils.toast(`✨ Bot responder set to ${value === 'business' ? 'Business Mode' : 'Personal Mode'}!`, 'success');
+        } catch (err) {
+          KwabzUtils.toast('Failed to save mode: ' + err.message, 'error');
+        }
+      }
+
+      async function saveBotTextConfig() {
+        const storeName = document.getElementById('cfgStoreName')?.value || '';
+        const hours = document.getElementById('cfgWorkingHours')?.value || '';
+        const welcome = document.getElementById('cfgWelcomeMessage')?.value || '';
+        const support = document.getElementById('cfgSupportMessage')?.value || '';
+        const personal = document.getElementById('cfgPersonalMessage')?.value || '';
+        
+        try {
+          await firebase.firestore().collection('settings').doc('whatsapp_bot_config').update({
+            store_name: storeName,
+            working_hours: hours,
+            welcome_message: welcome,
+            support_message: support,
+            personal_mode_message: personal
+          });
+          KwabzUtils.toast('✨ Text settings updated and pushed to bot!', 'success');
+        } catch (err) {
+          KwabzUtils.toast('Failed to save changes: ' + err.message, 'error');
+        }
+      }
+
+      async function addSellerAssignment() {
+        const select = document.getElementById('newAssignSeller');
+        const nameInput = document.getElementById('newAssignName');
+        const phoneInput = document.getElementById('newAssignPhone');
+        
+        if (!select || !nameInput || !phoneInput) return;
+        
+        const sellerId = select.value;
+        const name = nameInput.value.trim();
+        const phone = phoneInput.value.trim().replace(/[^0-9]/g, '');
+        
+        if (!sellerId) {
+          KwabzUtils.toast('Please select a seller or branch.', 'warning');
+          return;
+        }
+        if (!name) {
+          KwabzUtils.toast('Please enter a display name or label.', 'warning');
+          return;
+        }
+        if (phone.length < 8) {
+          KwabzUtils.toast('Please enter a valid phone number (country code included).', 'warning');
+          return;
+        }
+        
+        const currentList = botConfigData.seller_assignments || [];
+        if (currentList.some(item => item.seller_id === sellerId)) {
+          KwabzUtils.toast('This seller already has an assignment. Remove it first.', 'warning');
+          return;
+        }
+        
+        const updatedList = [...currentList, { seller_id: sellerId, name, phone }];
+        try {
+          await firebase.firestore().collection('settings').doc('whatsapp_bot_config').update({
+            seller_assignments: updatedList
+          });
+          KwabzUtils.toast('✨ New seller alert assignment added!', 'success');
+          nameInput.value = '';
+          phoneInput.value = '';
+          select.value = '';
+        } catch (err) {
+          KwabzUtils.toast('Failed to add assignment: ' + err.message, 'error');
+        }
+      }
+
+      async function removeSellerAssignment(index) {
+        const currentList = botConfigData.seller_assignments || [];
+        const updatedList = currentList.filter((_, idx) => idx !== index);
+        try {
+          await firebase.firestore().collection('settings').doc('whatsapp_bot_config').update({
+            seller_assignments: updatedList
+          });
+          KwabzUtils.toast('🗑️ Seller assignment removed successfully.', 'success');
+        } catch (err) {
+          KwabzUtils.toast('Failed to remove assignment: ' + err.message, 'error');
+        }
+      }
+
+      window.setBotConfigField = setBotConfigField;
+      window.saveBotTextConfig = saveBotTextConfig;
+      window.addSellerAssignment = addSellerAssignment;
+      window.removeSellerAssignment = removeSellerAssignment;
+
+      let botAccountsAttached = false;
+      function attachBotAccountsListener() {
+        if (botAccountsAttached) return;
+        botAccountsAttached = true;
+        
+        console.log('[Dashboard] Attaching WhatsApp Bot Accounts watcher...');
+        
+        // Show an immediate loading shimmer so the grid is never invisibly empty
+        const _loadContainer = document.getElementById('botAccountsContainer');
+        if (_loadContainer && _loadContainer.children.length === 0) {
+          _loadContainer.innerHTML = `
+            <div style="grid-column:1/-1;text-align:center;padding:2rem;color:var(--outline);">
+              <span class="material-symbols-outlined" style="font-size:2rem;display:block;margin-bottom:0.5rem;animation:hubSpin 1.5s linear infinite;">sync</span>
+              <p style="margin:0;font-weight:700;font-size:0.8125rem;">Loading bot accounts…</p>
+            </div>
+          `;
+        }
+        
+        // Seed primary 'main' account in Firestore if completely empty
+        firebase.firestore().collection('whatsapp_bot_accounts').doc('main').get().then(doc => {
+          if (!doc.exists) {
+            firebase.firestore().collection('whatsapp_bot_accounts').doc('main').set({
+              id: 'main',
+              status: 'offline',
+              action: 'idle',
+              name: 'Primary Bot Account',
+              updated_at: firebase.firestore.FieldValue.serverTimestamp()
+            }).catch(e => console.warn('[Dashboard] Failed to write initial seed:', e));
+          }
+        }).catch(err => {
+          console.warn('[Dashboard] Seeding main account failed/skipped:', err.message || err);
+        });
+
+        firebase.firestore().collection('whatsapp_bot_accounts')
+          .onSnapshot(snapshot => {
+            const container = document.getElementById('botAccountsContainer');
+            if (!container) return;
+            
+            if (snapshot.empty) {
+              container.innerHTML = `
+                <div style="grid-column:1/-1; text-align:center; padding:2rem; color:var(--outline); background:var(--surface-container-lowest); border-radius:var(--radius-xl); border:1px dashed var(--outline-variant);">
+                  <p style="font-weight:700; margin:0; font-size:0.875rem;">No WhatsApp accounts linked.</p>
+                  <p style="margin:0.25rem 0 0; font-size:0.75rem;">Click "Add WhatsApp Account" above to connect your first line.</p>
+                </div>
+              `;
+              return;
+            }
+            
+            // Build set of currently active document IDs
+            const activeIds = new Set();
+            snapshot.forEach(doc => activeIds.add(doc.id));
+            
+            // Remove deleted account cards
+            const existingCards = container.querySelectorAll('.bot-account-card');
+            existingCards.forEach(card => {
+              const cardId = card.getAttribute('data-account-id');
+              if (!activeIds.has(cardId)) {
+                card.remove();
+              }
+            });
+            
+            // Remove placeholder if present
+            const placeholder = container.querySelector('[style*="grid-column:1/-1"]');
+            if (placeholder) placeholder.remove();
+
+            // Read and sort account states
+            const docs = [];
+            snapshot.forEach(doc => {
+              if (doc.id === 'undefined') return; // Skip garbage/test documents
+              const data = doc.data();
+              if (!data.id) data.id = doc.id;
+              docs.push(data);
+            });
+            docs.sort((a, b) => {
+              if (a.id === 'main') return -1;
+              if (b.id === 'main') return 1;
+              if (!a.id) return 1;
+              if (!b.id) return -1;
+              return a.id.localeCompare(b.id);
+            });
+
+            docs.forEach(account => {
+              const accountId = account.id;
+              const status = account.status || 'offline';
+              const name = account.name || (accountId === 'main' ? 'Primary Bot Account' : `WhatsApp Account (${accountId})`);
+              
+              let dotColor = '#ef4444';
+              let dotShadow = '0 0 8px #ef4444';
+              let dotAnimation = 'none';
+              let statusText = 'OFFLINE';
+              let statusTextColor = 'var(--outline)';
+              let statusDesc = 'Bot process is disconnected.';
+              
+              let showStart = true;
+              let showStop = false;
+              let startDisabled = false;
+              let stopDisabled = false;
+              let startText = '<span class="material-symbols-outlined" style="font-size:0.875rem;">play_arrow</span> Connect';
+              
+              let showQr = false;
+              let qrSrc = '';
+              let showInfo = false;
+              let pushname = '';
+              let wid = '';
+              
+              if (status === 'offline') {
+                statusDesc = 'Disconnected. Toggle "Connect" to pair/initialize.';
+              } else if (status === 'starting' || status === 'stopping') {
+                dotColor = '#eab308';
+                dotShadow = '0 0 8px #eab308';
+                dotAnimation = 'pulse 1.5s infinite';
+                statusText = status === 'starting' ? 'CONNECTING...' : 'DISCONNECTING...';
+                statusTextColor = '#eab308';
+                
+                const percent = account.percent !== undefined && account.percent !== null ? ` (${account.percent}%)` : '';
+                const msg = account.message ? `: ${account.message}` : '';
+                statusDesc = status === 'starting' 
+                  ? `Initializing Chrome engine${percent}${msg}...` 
+                  : 'Shutting down connection...';
+                
+                startDisabled = true;
+                startText = '<span class="spinner" style="width:12px;height:12px;border-width:2px;margin-right:0.25rem;"></span> Wait...';
+              } else if (status === 'scanning') {
+                dotColor = '#eab308';
+                dotShadow = '0 0 8px #eab308';
+                dotAnimation = 'pulse 1.5s infinite';
+                statusText = 'PAIRING REQUIRED';
+                statusTextColor = '#eab308';
+                statusDesc = 'Scan QR code below with your phone WhatsApp Linked Devices.';
+                showStart = false;
+                showStop = true;
+                if (account.qr) {
+                  showQr = true;
+                  qrSrc = account.qr;
+                }
+              } else if (status === 'authenticated') {
+                dotColor = '#10b981';
+                dotShadow = '0 0 8px #10b981';
+                dotAnimation = 'pulse 1.5s infinite';
+                statusText = 'AUTHENTICATED';
+                statusTextColor = '#10b981';
+                statusDesc = 'Verifying secure session channels...';
+                showStart = false;
+                showStop = true;
+              } else if (status === 'online') {
+                dotColor = '#10b981';
+                dotShadow = '0 0 8px #10b981';
+                statusText = 'ACTIVE & ONLINE';
+                statusTextColor = '#10b981';
+                statusDesc = 'Order automation running successfully. Monitoring collections for new orders.';
+                showStart = false;
+                showStop = true;
+                showInfo = true;
+                if (account.info) {
+                  pushname = account.info.pushname || 'Admin Account';
+                  wid = `+${account.info.wid}`;
+                }
+              } else if (status === 'error') {
+                dotColor = '#ef4444';
+                dotShadow = '0 0 8px #ef4444';
+                statusText = 'ERROR';
+                statusTextColor = '#ef4444';
+                statusDesc = `Error: ${account.error || 'Initialization failure'}.`;
+                showStart = true;
+                showStop = true;
+                startText = '<span class="material-symbols-outlined" style="font-size:0.875rem;">refresh</span> Retry';
+              }
+
+              let card = document.getElementById(`bot-account-card-${accountId}`);
+              if (!card) {
+                card = document.createElement('div');
+                card.id = `bot-account-card-${accountId}`;
+                card.className = 'bot-account-card card card--flat';
+                card.setAttribute('data-account-id', accountId);
+                card.style.cssText = 'padding:1.25rem;background:var(--surface-container-lowest);display:flex;flex-direction:column;gap:1rem;border:1px solid var(--outline-variant);border-radius:var(--radius-xl);animation:fadeIn 0.3s ease;';
+                
+                const deleteBtn = accountId !== 'main' 
+                  ? `<button onclick="deleteBotAccount('${accountId}')" style="color:#ef4444;background:transparent;border:none;cursor:pointer;display:flex;align-items:center;padding:4px;border-radius:50%;transition:background 0.2s;" title="Delete Slot">
+                       <span class="material-symbols-outlined" style="font-size:1.125rem;">delete</span>
+                     </button>`
+                  : '';
+
+                card.innerHTML = `
+                  <!-- Account Header -->
+                  <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--outline-variant);padding-bottom:0.5rem;margin-bottom:-0.25rem;">
+                    <span style="font-weight:800;font-size:0.8125rem;color:var(--on-surface);display:flex;align-items:center;gap:0.4rem;">
+                      <span class="material-symbols-outlined" style="color:var(--primary);font-size:1.125rem;">account_circle</span>
+                      <span class="card-name">${name}</span>
+                    </span>
+                    ${deleteBtn}
+                  </div>
+                  
+                  <!-- Status Row -->
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:140px;">
+                      <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.15rem;">
+                        <span class="status-dot" style="width:0.5rem;height:0.5rem;border-radius:50%;display:inline-block;"></span>
+                        <p class="status-text" style="font-weight:800;font-size:0.75rem;margin:0;text-transform:uppercase;letter-spacing:0.04em;"></p>
+                      </div>
+                      <p class="status-desc" style="color:var(--outline);font-size:0.7rem;margin:0;line-height:1.3;"></p>
+                    </div>
+                    
+                    <div class="card-actions" style="display:flex;gap:0.4rem;"></div>
+                  </div>
+                  
+                  <!-- QR Pairing Code Section -->
+                  <div class="qr-section" style="display:none;flex-direction:column;align-items:center;gap:0.5rem;padding:0.75rem;background:var(--surface-container-high);border-radius:var(--radius-lg);border:1px dashed var(--outline-variant);text-align:center;">
+                    <p style="font-weight:700;font-size:0.7rem;color:var(--on-surface);margin:0;">👉 Scan QR Code to pair:</p>
+                    <div style="background:white;padding:0.5rem;border-radius:var(--radius-md);display:inline-block;box-shadow:0 4px 12px rgba(0,0,0,0.05);">
+                      <img class="qr-image" src="" alt="WhatsApp Pairing QR" style="width:130px;height:130px;display:block;" />
+                    </div>
+                  </div>
+                  
+                  <!-- Online Info Box -->
+                  <div class="info-section" style="display:none;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;background:#dcfce7;border:1px solid #bbf7d0;border-radius:var(--radius-lg);color:#14532d;">
+                    <span class="material-symbols-outlined" style="font-size:1.5rem;color:#166534;">check_circle</span>
+                    <div style="flex:1;min-width:0;">
+                      <p class="info-pushname" style="margin:0;font-weight:800;font-size:0.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></p>
+                      <p class="info-wid" style="margin:0.05rem 0 0;font-size:0.6rem;color:#166534;font-weight:600;"></p>
+                    </div>
+                  </div>
+                `;
+                container.appendChild(card);
+              }
+
+              // Update status styles and content dynamically in-place
+              const dotEl = card.querySelector('.status-dot');
+              dotEl.style.backgroundColor = dotColor;
+              dotEl.style.boxShadow = dotShadow;
+              dotEl.style.animation = dotAnimation;
+
+              const statusTextEl = card.querySelector('.status-text');
+              statusTextEl.innerText = statusText;
+              statusTextEl.style.color = statusTextColor;
+
+              card.querySelector('.status-desc').innerText = statusDesc;
+
+              // Render button actions in place
+              const actionsContainer = card.querySelector('.card-actions');
+              let buttonsHtml = '';
+              if (showStart) {
+                buttonsHtml += `<button onclick="toggleBotAccountState('${accountId}', 'start')" class="btn-primary" style="width:auto;padding:0.4rem 0.8rem;font-size:0.6875rem;border-radius:var(--radius-md);display:flex;align-items:center;gap:0.25rem;background:#166534;border-color:#166534;font-weight:700;cursor:pointer;" ${startDisabled ? 'disabled' : ''}>${startText}</button>`;
+              }
+              if (showStop) {
+                buttonsHtml += `<button onclick="toggleBotAccountState('${accountId}', 'stop')" class="btn-secondary" style="width:auto;padding:0.4rem 0.8rem;font-size:0.6875rem;border-radius:var(--radius-md);display:flex;align-items:center;gap:0.25rem;color:#b91c1c;border-color:#fca5a5;background:#fef2f2;font-weight:700;cursor:pointer;" ${stopDisabled ? 'disabled' : ''}><span class="material-symbols-outlined" style="font-size:0.8rem;">stop</span> Stop</button>`;
+              }
+              actionsContainer.innerHTML = buttonsHtml;
+
+              // Update QR code container dynamically (check if source changed to avoid image reload flicker)
+              const qrSec = card.querySelector('.qr-section');
+              if (showQr) {
+                qrSec.style.display = 'flex';
+                const imgEl = qrSec.querySelector('.qr-image');
+                if (imgEl.getAttribute('src') !== qrSrc) {
+                  imgEl.setAttribute('src', qrSrc);
+                }
+              } else {
+                qrSec.style.display = 'none';
+              }
+
+              // Update Info details in place
+              const infoSec = card.querySelector('.info-section');
+              if (showInfo) {
+                infoSec.style.display = 'flex';
+                card.querySelector('.info-pushname').innerText = pushname;
+                card.querySelector('.info-wid').innerText = `WID: ${wid}`;
+              } else {
+                infoSec.style.display = 'none';
+              }
+            });
+            
+            // Maintain DOM sorting physically (keep 'main' card at the very front)
+            const cardsArray = Array.from(container.children);
+            cardsArray.sort((a, b) => {
+              const idA = a.getAttribute('data-account-id') || '';
+              const idB = b.getAttribute('data-account-id') || '';
+              if (idA === 'main') return -1;
+              if (idB === 'main') return 1;
+              return idA.localeCompare(idB);
+            });
+            cardsArray.forEach(child => container.appendChild(child));
+          }, err => {
+            console.error('Failed to listen to bot accounts:', err);
+            const container = document.getElementById('botAccountsContainer');
+            if (container) {
+              container.innerHTML = `
+                <div style="grid-column:1/-1; text-align:center; padding:2rem; color:#b91c1c; background:#fef2f2; border:1px solid #fca5a5; border-radius:var(--radius-xl);">
+                  <span class="material-symbols-outlined" style="font-size:2rem; display:block; margin-bottom:0.5rem;">error</span>
+                  <p style="margin:0; font-weight:800; font-size:0.875rem;">Database Sync Error</p>
+                  <p style="margin:0.25rem 0 0; font-size:0.75rem; color:#991b1b;">${err.message || err}</p>
+                </div>
+              `;
+            }
+          });
+      }
+
+      async function toggleBotAccountState(accountId, action) {
+        try {
+          if (action === 'start') {
+            KwabzUtils.toast(`🚀 Connecting ${accountId}...`, 'info');
+          } else {
+            KwabzUtils.toast(`⏹️ Disconnecting ${accountId}...`, 'info');
+          }
+          await firebase.firestore().collection('whatsapp_bot_accounts').doc(accountId).set({
+            action: action,
+            updated_at: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          KwabzUtils.toast('Action failed: ' + err.message, 'error');
+        }
+      }
+
+      async function addNewBotAccount() {
+        const id = 'acc_' + Math.floor(Math.random() * 1000000);
+        const name = prompt('Enter a label or branch name for this WhatsApp account (e.g. Accra Branch, Support Line):');
+        if (!name) return;
+        
+        try {
+          await firebase.firestore().collection('whatsapp_bot_accounts').doc(id).set({
+            id: id,
+            name: name,
+            status: 'offline',
+            action: 'start', // Start it immediately
+            updated_at: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          KwabzUtils.toast(`✨ WhatsApp bot connection slot "${name}" created!`, 'success');
+        } catch (err) {
+          KwabzUtils.toast('Failed to create account slot: ' + err.message, 'error');
+        }
+      }
+
+      async function deleteBotAccount(accountId) {
+        if (accountId === 'main') {
+          KwabzUtils.toast('Cannot delete the primary account slot.', 'warning');
+          return;
+        }
+        if (!confirm('Are you sure you want to permanently delete this WhatsApp connection slot? This will disconnect the bot from this line and delete local sessions.')) {
+          return;
+        }
+        try {
+          // Stop it first
+          await firebase.firestore().collection('whatsapp_bot_accounts').doc(accountId).update({ action: 'stop' });
+          setTimeout(async () => {
+            await firebase.firestore().collection('whatsapp_bot_accounts').doc(accountId).delete();
+            KwabzUtils.toast('🗑️ WhatsApp connection slot removed.', 'success');
+          }, 1500);
+        } catch (err) {
+          KwabzUtils.toast('Failed to delete slot: ' + err.message, 'error');
+        }
+      }
+
+      window.toggleBotAccountState = toggleBotAccountState;
+      window.addNewBotAccount = addNewBotAccount;
+      window.deleteBotAccount = deleteBotAccount;
+
+      let pinsAttached = false;
+      function attachSellerPinsListener() {
+        if (pinsAttached) return;
+        pinsAttached = true;
+        
+        firebase.firestore().collection('seller_pins')
+          .orderBy('created_at', 'desc')
+          .onSnapshot(snapshot => {
+            const tbody = document.getElementById('sellerPinsTableBody');
+            if (!tbody) return;
+            
+            if (snapshot.empty) {
+              tbody.innerHTML = '<tr><td colspan="6" style="padding:1.5rem;text-align:center;color:var(--outline);font-size:0.75rem;">No activation PINs found.</td></tr>';
+              return;
+            }
+            
+            let html = '';
+            snapshot.forEach(doc => {
+              try {
+                const data = doc.data();
+                const pinId = doc.id;
+                const status = data.status || 'pending';
+                const type = data.account_type || data.plan || 'Free';
+                const reqBy = data.requested_by || 'Admin Generated';
+                
+                let dateObj = new Date();
+                if (data.created_at) {
+                  if (typeof data.created_at.toDate === 'function') {
+                    dateObj = data.created_at.toDate();
+                  } else {
+                    dateObj = new Date(data.created_at);
+                  }
+                }
+                const dateStr = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                
+                let statusBadge = '';
+                if (status === 'pending') statusBadge = '<span style="background:#fef08a;color:#854d0e;padding:0.25rem 0.5rem;border-radius:var(--radius-sm);font-weight:700;font-size:0.65rem;">PENDING</span>';
+                else if (status === 'active') statusBadge = '<span style="background:#bbf7d0;color:#166534;padding:0.25rem 0.5rem;border-radius:var(--radius-sm);font-weight:700;font-size:0.65rem;">ACTIVE</span>';
+                else if (status === 'used') statusBadge = '<span style="background:#e5e7eb;color:#374151;padding:0.25rem 0.5rem;border-radius:var(--radius-sm);font-weight:700;font-size:0.65rem;">USED</span>';
+                else statusBadge = `<span style="background:var(--surface-container-high);color:var(--outline);padding:0.25rem 0.5rem;border-radius:var(--radius-sm);font-weight:700;font-size:0.65rem;">${status.toUpperCase()}</span>`;
+
+                html += `
+                  <tr style="border-bottom:1px solid var(--outline-variant); background:var(--surface-container-lowest);">
+                    <td style="padding:0.75rem 1rem; font-size:0.875rem; font-weight:700; color:var(--on-surface); font-family:monospace;">${pinId}</td>
+                    <td style="padding:0.75rem 1rem; font-size:0.75rem; font-weight:700; color:var(--primary);">${type.toUpperCase()}</td>
+                    <td style="padding:0.75rem 1rem;">${statusBadge}</td>
+                    <td style="padding:0.75rem 1rem; font-size:0.75rem; color:var(--on-surface-variant);">${reqBy}</td>
+                    <td style="padding:0.75rem 1rem; font-size:0.75rem; color:var(--outline);">${dateStr}</td>
+                    <td style="padding:0.75rem 1rem; text-align:right;">
+                      <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                        <button onclick="editSellerPin('${pinId}', '${status}')" class="btn-secondary" style="padding:0.25rem 0.5rem; font-size:0.6875rem; border-radius:var(--radius-sm); display:flex; align-items:center; gap:0.25rem; cursor:pointer;" title="Change Status">
+                          <span class="material-symbols-outlined" style="font-size:0.875rem;">edit</span>
+                        </button>
+                        <button onclick="deleteSellerPin('${pinId}')" class="btn-secondary" style="padding:0.25rem 0.5rem; font-size:0.6875rem; border-radius:var(--radius-sm); color:#b91c1c; border-color:#fca5a5; display:flex; align-items:center; gap:0.25rem; cursor:pointer;" title="Delete PIN">
+                          <span class="material-symbols-outlined" style="font-size:0.875rem;">delete</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              } catch (err) {
+                console.error("Error rendering PIN row", doc.id, err);
+              }
+            });
+            tbody.innerHTML = html;
+          }, err => {
+            console.error('Failed to listen to seller pins:', err);
+            const tbody = document.getElementById('sellerPinsTableBody');
+            if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="padding:1.5rem;text-align:center;color:#b91c1c;background:#fef2f2;font-size:0.8rem;"><b>Sync Error:</b> ${err.message || err}<br>If permissions are missing, please sign in natively.</td></tr>`;
+          });
+      }
+
+      async function generateSellerPin() {
+        const type = prompt('Enter account type for this PIN (free, basic, premium):', 'free');
+        if (!type) return; // User cancelled
+        
+        const pinStr = Math.floor(100000 + Math.random() * 900000).toString();
+        const pinId = pinStr;
+        try {
+          await firebase.firestore().collection('seller_pins').doc(pinId).set({
+            pin: pinId,
+            status: 'active',
+            account_type: type,
+            requested_by: 'Admin Generated',
+            created_at: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          KwabzUtils.toast('✨ New active PIN generated: ' + pinId, 'success');
+
+        } catch (err) {
+          KwabzUtils.toast('Failed to generate PIN: ' + err.message, 'error');
+        }
+      }
+
+      async function deleteSellerPin(pinId) {
+        if (!confirm('Are you sure you want to delete PIN: ' + pinId + '?')) return;
+        try {
+          await firebase.firestore().collection('seller_pins').doc(pinId).delete();
+          KwabzUtils.toast('🗑️ PIN deleted.', 'success');
+        } catch (err) {
+          KwabzUtils.toast('Failed to delete PIN: ' + err.message, 'error');
+        }
+      }
+
+      async function editSellerPin(pinId, currentStatus) {
+        const newStatus = prompt('Enter new status for ' + pinId + ' (pending, active, used):', currentStatus);
+        if (!newStatus || newStatus === currentStatus) return;
+        if (!['pending', 'active', 'used'].includes(newStatus.toLowerCase())) {
+          KwabzUtils.toast('Invalid status. Use: pending, active, or used.', 'error');
+          return;
+        }
+        
+        const newType = prompt('Enter account type (free, basic, premium):', 'free');
+        if (!newType) return;
+        
+        try {
+          await firebase.firestore().collection('seller_pins').doc(pinId).update({
+            status: newStatus.toLowerCase(),
+            account_type: newType
+          });
+          KwabzUtils.toast('✅ PIN status updated to ' + newStatus, 'success');
+        } catch (err) {
+          KwabzUtils.toast('Failed to update PIN: ' + err.message, 'error');
+        }
+      }
+
+      window.generateSellerPin = generateSellerPin;
+      window.deleteSellerPin = deleteSellerPin;
+      window.editSellerPin = editSellerPin;
+
       function tryAttachListeners() {
-        if (KwabzStore.isAuthReady() && KwabzStore.isAdminLoggedIn() && KwabzStore.getSyncStatus() === 'online') {
+        const authReady = KwabzStore.isAuthReady();
+        const adminIn   = KwabzStore.isAdminLoggedIn();
+        const syncSt    = KwabzStore.getSyncStatus();
+        // Also check native Firebase Auth as a fallback gate for the bot listener —
+        // KwabzStore's isAdminLoggedIn() can return false during the async role-fetch window
+        // even though the user is already authenticated. Firebase Auth is the ground truth.
+        const firebaseUser = (typeof firebase !== 'undefined' && firebase.auth) ? firebase.auth().currentUser : null;
+        console.log(`[Dashboard] tryAttachListeners — authReady:${authReady} adminIn:${adminIn} syncStatus:${syncSt} firebaseUser:${firebaseUser?.email || 'none'} botAttached:${botAccountsAttached} configAttached:${configAttached}`);
+
+        if (authReady && adminIn) {
           attachPresence();
           attachVisitorCount();
           fetchReviewsCount();
+        }
+
+        // Bot listeners should attach if either resolved via KwabzStore admin state OR directly authenticated via Firebase Auth
+        const canAttachBot = adminIn || !!firebaseUser;
+        if (canAttachBot && !botAccountsAttached) {
+          attachBotAccountsListener();
+        }
+        if (canAttachBot && !configAttached) {
+          attachBotConfigListener();
+        }
+        if (canAttachBot && !pinsAttached) {
+          attachSellerPinsListener();
         }
       }
 
@@ -1372,13 +3089,313 @@
           }
         }
 
-        if (s === 'online') {
-          tryAttachListeners();
-        }
+        tryAttachListeners();
         debouncedRender();
       });
 
+      // ── Direct Firebase Auth hook — most reliable trigger ────────────────
+      // KwabzStore's admin_ready fires after an async Firestore role fetch which
+      // can be delayed or missed. onAuthStateChanged fires as soon as Firebase
+      // confirms the session, giving us the earliest possible signal.
+      if (typeof firebase !== 'undefined' && firebase.auth) {
+        firebase.auth().onAuthStateChanged((user) => {
+          if (user) {
+            console.log(`[Dashboard] firebase.auth onAuthStateChanged — user: ${user.email}. Triggering bot attach.`);
+            tryAttachListeners();
+          }
+        });
+      }
+
+      // ── Safety retry loop ─────────────────────────────────────────────────
+      let _retryCount = 0;
+      const _retryTimer = setInterval(() => {
+        _retryCount++;
+        if (botAccountsAttached && configAttached) {
+          clearInterval(_retryTimer);
+          return;
+        }
+        console.log(`[Dashboard] Safety retry #${_retryCount} — attempting tryAttachListeners...`);
+        tryAttachListeners();
+        if (_retryCount >= 30) {
+          clearInterval(_retryTimer);
+          console.warn('[Dashboard] Safety retry limit reached.');
+        }
+      }, 500);
+
     }); // end _onStoreReady
+
+    // ─── Admin Live Map Initialization ───
+    let adminMap = null;
+    let markersLayer = null;
+
+    function initAdminMap() {
+      if (!document.getElementById('adminLiveMap')) return;
+      if (adminMap) return;
+
+      // Default center (KNUST or general area)
+      adminMap = L.map('adminLiveMap').setView([6.6732, -1.5674], 14);
+
+      L.tileLayer('https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+        attribution: '&copy; Google Maps',
+        subdomains: ['mt0','mt1','mt2','mt3'],
+        maxZoom: 22,
+        maxNativeZoom: 20
+      }).addTo(adminMap);
+
+      markersLayer = L.featureGroup().addTo(adminMap);
+      updateAdminMap();
+    }
+
+    function getPinHtml(photoUrl) {
+      return `
+        <div style="position:relative; width:40px; height:50px;">
+          <svg viewBox="0 0 24 30" width="40" height="50" style="filter:drop-shadow(0 4px 6px rgba(0,0,0,0.3));">
+            <path d="M12 0C5.373 0 0 5.373 0 12c0 9 12 18 12 18s12-9 12-18c0-6.627-5.373-12-12-12z" fill="var(--primary, #000)"/>
+          </svg>
+          <img src="${photoUrl || 'https://via.placeholder.com/40'}" style="position:absolute; top:4px; left:6px; width:28px; height:28px; border-radius:50%; object-fit:cover; border:2px solid white; background:white;" onerror="this.src='https://via.placeholder.com/40';" />
+        </div>
+      `;
+    }
+
+    function updateAdminMap() {
+      if (!adminMap || !markersLayer) return;
+      adminMap.invalidateSize();
+      markersLayer.clearLayers();
+
+      const orders = KwabzStore.getOrders() || [];
+      const activeOrders = orders.filter(o => o.status !== 'delivered' && o.status !== 'cancelled');
+
+      if (activeOrders.length === 0) return;
+
+      // KNUST coordinates for random offsets
+      const baseLat = 6.6732;
+      const baseLng = -1.5674;
+
+      activeOrders.forEach((order, idx) => {
+        let lat, lng;
+        if (order.customer && typeof order.customer.lat === 'number' && typeof order.customer.lng === 'number') {
+          lat = order.customer.lat;
+          lng = order.customer.lng;
+        } else {
+          let seed = 0;
+          for(let i=0; i<order.id.length; i++) { seed += order.id.charCodeAt(i); }
+          const offsetLat = (Math.sin(seed) * 0.01);
+          const offsetLng = (Math.cos(seed) * 0.01);
+          lat = baseLat + offsetLat;
+          lng = baseLng + offsetLng;
+        }
+
+        // Assuming customer profile info might be saved or we use a placeholder
+        const userPic = order.customer?.photoURL || 'https://api.dicebear.com/7.x/initials/svg?seed=' + encodeURIComponent(order.customer?.name || 'User');
+
+        const customIcon = L.divIcon({
+          className: 'custom-svg-pin',
+          html: getPinHtml(userPic),
+          iconSize: [40, 50],
+          iconAnchor: [20, 50],
+          popupAnchor: [0, -40]
+        });
+
+        const marker = L.marker([lat, lng], { icon: customIcon }).addTo(markersLayer);
+        
+        const popupContent = `
+          <div style="font-family:sans-serif; text-align:center;">
+            <p style="margin:0; font-weight:bold; font-size:14px;">${order.customer?.name || 'Customer'}</p>
+            <p style="margin:4px 0 0; font-size:12px; color:#666;">Status: <span style="text-transform:capitalize;font-weight:600;">${order.status}</span></p>
+            <p style="margin:4px 0 0; font-size:12px;">${order.order_label || order.id.substring(0,8)}</p>
+          </div>
+        `;
+        marker.bindPopup(popupContent);
+      });
+
+      if (activeOrders.length > 0) {
+        adminMap.fitBounds(markersLayer.getBounds(), { padding: [30, 30], maxZoom: 16 });
+      }
+    }
+
+    // Connect to global updates
+    KwabzStore.on('orders_changed', () => {
+      if (adminMap) updateAdminMap();
+    });
+
+    function toggleAdminMapFull() {
+      const container = document.getElementById('adminLiveMapContainer');
+      const mapDiv = document.getElementById('adminLiveMap');
+      const btn = document.getElementById('adminMapToggleBtn');
+      const btnIcon = btn.querySelector('.material-symbols-outlined');
+
+      if (!container.dataset.full) {
+        container.dataset.full = "true";
+        container.style.position = 'fixed';
+        container.style.top = '0';
+        container.style.left = '0';
+        container.style.width = '100vw';
+        container.style.height = '100vh';
+        container.style.zIndex = '9999';
+        container.style.borderRadius = '0';
+        mapDiv.style.height = 'calc(100vh - 42px)';
+        btnIcon.textContent = 'fullscreen_exit';
+        
+        btn.style.position = 'fixed';
+        btn.style.top = '1rem';
+        btn.style.right = '1rem';
+        btn.style.zIndex = '10000';
+        btn.style.background = 'var(--surface)';
+        btn.style.boxShadow = 'var(--shadow-ambient)';
+      } else {
+        container.dataset.full = "";
+        container.style.position = 'relative';
+        container.style.top = 'auto';
+        container.style.left = 'auto';
+        container.style.width = '100%';
+        container.style.height = 'auto';
+        container.style.zIndex = 'auto';
+        container.style.borderRadius = 'var(--radius-xl)';
+        mapDiv.style.height = '350px';
+        btnIcon.textContent = 'fullscreen';
+
+        btn.style.position = 'static';
+        btn.style.top = 'auto';
+        btn.style.right = 'auto';
+        btn.style.zIndex = 'auto';
+        btn.style.background = 'var(--surface-container-high)';
+        btn.style.boxShadow = 'none';
+      }
+
+      setTimeout(() => {
+        if (adminMap) adminMap.invalidateSize();
+      }, 350);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      // Initialize map slightly after page load to ensure container is rendered
+      setTimeout(initAdminMap, 1500);
+    });
+
+  </script>
+  <!-- Mobile Action FAB (Menu / Logout) -->
+  <div id="adminMobileFabContainer" style="position:fixed; bottom:6.5rem; right:1.5rem; z-index:9999;">
+    
+    <!-- Mini buttons (Speed Dial) -->
+    <div id="adminFabDial">
+      <button class="icon-btn" onclick="document.getElementById('adminDrawer').classList.add('open'); toggleAdminFab();" style="background:var(--surface-container-high); color:var(--on-surface); border-radius:50%; width:3rem; height:3rem; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+        <span class="material-symbols-outlined">menu</span>
+      </button>
+      <button class="icon-btn" onclick="KwabzStore.adminLogout().then(() => window.location.href='admin-login.html');" style="background:var(--error); color:white; border-radius:50%; width:3rem; height:3rem; box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+        <span class="material-symbols-outlined">logout</span>
+      </button>
+    </div>
+
+    <!-- Main FAB -->
+    <button id="adminFabMain" class="btn-primary" style="width:3.5rem; height:3.5rem; border-radius:50%; padding:0; display:flex; align-items:center; justify-content:center; box-shadow:0 10px 25px rgba(0,0,0,0.2); transition:all 0.3s;">
+      <span class="material-symbols-outlined" style="font-size:1.5rem; transition:transform 0.3s;" id="adminFabIcon">more_vert</span>
+    </button>
+  </div>
+
+  <style>
+    #adminFabDial {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      position: absolute;
+      bottom: 4.5rem;
+      right: 0.25rem;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(20px);
+    }
+    #adminFabDial.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .fab-icon-rotate {
+      transform: rotate(90deg);
+    }
+    @media (min-width: 769px) {
+      #adminMobileFabContainer {
+        display: none !important;
+      }
+    }
+    @media (max-width: 768px) {
+      #desktopMenuBtn, #desktopLogoutBtn {
+        display: none !important;
+      }
+    }
+  </style>
+
+  <script>
+    function toggleAdminFab() {
+      const dial = document.getElementById('adminFabDial');
+      const icon = document.getElementById('adminFabIcon');
+      if (dial.classList.contains('open')) {
+        dial.classList.remove('open');
+        icon.classList.remove('fab-icon-rotate');
+      } else {
+        dial.classList.add('open');
+        icon.classList.add('fab-icon-rotate');
+      }
+    }
+    
+    // Support long press and short tap properly without ghost clicks
+    let fabPressTimer;
+    let ignoreNextClick = false;
+    const adminFabBtn = document.getElementById('adminFabMain');
+    
+    if(adminFabBtn) {
+      adminFabBtn.addEventListener('click', (e) => {
+        if (ignoreNextClick) {
+          ignoreNextClick = false;
+          return;
+        }
+        toggleAdminFab();
+      });
+
+      adminFabBtn.addEventListener('touchstart', (e) => {
+        fabPressTimer = setTimeout(() => {
+          ignoreNextClick = true;
+          if (!document.getElementById('adminFabDial').classList.contains('open')) {
+             toggleAdminFab();
+          }
+        }, 500);
+      }, {passive: true});
+
+      adminFabBtn.addEventListener('touchend', () => {
+        clearTimeout(fabPressTimer);
+      });
+
+      adminFabBtn.addEventListener('touchmove', () => {
+        clearTimeout(fabPressTimer);
+      }, {passive: true});
+    }
+  </script>
+
+  <script>
+    function checkRedisHealth() {
+      fetch((window.RENDER_API_BASE || '') + '/api/health')
+        .then(res => res.json())
+        .then(data => {
+           const ind = document.getElementById('redisIndicator');
+           if(ind) {
+             ind.style.opacity = data.redis === 'connected' ? '1' : '0.3';
+             if (data.redis !== 'connected') {
+               ind.style.background = 'rgba(239,68,68,0.1)';
+               ind.style.color = '#ef4444';
+               ind.style.borderColor = 'rgba(239,68,68,0.2)';
+               ind.innerHTML = '<span style="width:4px; height:4px; background:#ef4444; border-radius:50%;"></span> NO REDIS';
+             }
+           }
+           const cProducts = document.getElementById('statCacheProducts');
+           const cCategories = document.getElementById('statCacheCategories');
+           if(cProducts && data.cacheSizes) cProducts.textContent = data.cacheSizes.products || 0;
+           if(cCategories && data.cacheSizes) cCategories.textContent = data.cacheSizes.categories || 0;
+        }).catch(e => console.log('health check fail'));
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      setTimeout(checkRedisHealth, 1000);
+      setInterval(checkRedisHealth, 20000);
+    });
   </script>
 </body>
 
