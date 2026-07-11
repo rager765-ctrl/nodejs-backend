@@ -81,6 +81,7 @@ const cache = {
   foodCategories: [],
   foodItems: [],
   bundles: [],
+  gigs: [],
   feedbackConfig: [],
   feedbackSubmissions: [],
   reviews: {} // productId -> reviews array
@@ -127,6 +128,7 @@ const cacheKeys = {
   bundles: 'kwabz:bundles',
   feedbackConfig: 'kwabz:feedbackConfig',
   feedbackSubmissions: 'kwabz:feedbackSubmissions',
+  gigs: 'kwabz:gigs',
   reviews: (productId) => `kwabz:reviews:${productId}`
 };
 
@@ -145,6 +147,7 @@ async function setCacheValue(key, value, ttlSeconds = null) {
   else if (key === cacheKeys.bundles) cache.bundles = value;
   else if (key === cacheKeys.feedbackConfig) cache.feedbackConfig = value;
   else if (key === cacheKeys.feedbackSubmissions) cache.feedbackSubmissions = value;
+  else if (key === cacheKeys.gigs) cache.gigs = value;
   else if (key.startsWith('kwabz:reviews:')) {
     const prodId = key.replace('kwabz:reviews:', '');
     cache.reviews[prodId] = { data: value, ts: Date.now() };
@@ -497,6 +500,18 @@ function setupBackgroundSync() {
       io.emit('feedback_submissions_changed', cache.feedbackSubmissions);
     }, err => {
       console.error('[Firestore Sync] Feedback submissions snapshot failed:', err.message);
+    });
+
+  // 16. Live Gigs Listener
+  unsubscribers.gigs = db.collection('gigs')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] gigs updated. Syncing ${snapshot.size} items.`);
+      const gigs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      gigs.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
+      await setCacheValue(cacheKeys.gigs, gigs);
+      io.emit('gigs_changed', cache.gigs);
+    }, err => {
+      console.error('[Firestore Sync] Gigs snapshot failed:', err.message);
     });
 }
 
@@ -1026,6 +1041,41 @@ app.delete('/api/feedback-submissions/:id', async (req, res) => {
   }
 });
 
+// ─── Gigs & Campus Opportunities Endpoints ────────────────────
+app.get('/api/gigs', (req, res) => {
+  res.json(cache.gigs.length > 0 ? cache.gigs : []);
+});
+
+app.post('/api/gigs', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const docRef = await db.collection('gigs').add(req.body);
+    res.json({ id: docRef.id, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/gigs/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('gigs').doc(req.params.id).set(req.body, { merge: true });
+    res.json({ id: req.params.id, ...req.body });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/gigs/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('gigs').doc(req.params.id).delete();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── WebSocket Event Handling ─────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`🔌 Client connected to Socket.IO: ${socket.id}`);
@@ -1044,6 +1094,7 @@ io.on('connection', (socket) => {
   if (cache.bundles.length > 0) socket.emit('bundles_changed', cache.bundles);
   if (cache.feedbackConfig.length > 0) socket.emit('feedback_config_changed', cache.feedbackConfig);
   if (cache.feedbackSubmissions.length > 0) socket.emit('feedback_submissions_changed', cache.feedbackSubmissions);
+  if (cache.gigs.length > 0) socket.emit('gigs_changed', cache.gigs);
 
   // Respond to client keep-alive pings (prevents Render free-tier sleep)
   socket.on('ping_keepalive', () => {
