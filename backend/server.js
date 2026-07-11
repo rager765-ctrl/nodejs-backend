@@ -1056,6 +1056,28 @@ app.post('/api/gigs', async (req, res) => {
   }
 });
 
+app.post('/api/gigs/public-submit', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const gigData = req.body;
+    const newGig = {
+      title: gigData.title,
+      category: gigData.category,
+      image_url: gigData.image_url || '',
+      about: gigData.about || '',
+      apply_link: gigData.apply_link || '',
+      is_hero: false,
+      is_approved: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    const docRef = await db.collection('gigs').add(newGig);
+    res.json({ id: docRef.id, ...newGig });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/gigs/:id', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
