@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { initializeApp, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
 import http, { createServer } from 'http';
 import https from 'https';
@@ -1049,8 +1049,13 @@ app.get('/api/gigs', (req, res) => {
 app.post('/api/gigs', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
-    const docRef = await db.collection('gigs').add(req.body);
-    res.json({ id: docRef.id, ...req.body });
+    const gigData = {
+      ...req.body,
+      apply_count: req.body.apply_count !== undefined ? req.body.apply_count : 0,
+      share_count: req.body.share_count !== undefined ? req.body.share_count : 0
+    };
+    const docRef = await db.collection('gigs').add(gigData);
+    res.json({ id: docRef.id, ...gigData });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1070,11 +1075,34 @@ app.post('/api/gigs/public-submit', async (req, res) => {
       is_approved: false,
       start_date: gigData.start_date || '',
       end_date: gigData.end_date || '',
+      apply_count: 0,
+      share_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
     const docRef = await db.collection('gigs').add(newGig);
     res.json({ id: docRef.id, ...newGig });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/gigs/:id/track', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const { id } = req.params;
+    const { action } = req.body;
+    const field = action === 'apply' ? 'apply_count' : action === 'share' ? 'share_count' : null;
+
+    if (!field) {
+      return res.status(400).json({ error: 'Invalid action' });
+    }
+
+    await db.collection('gigs').doc(id).update({
+      [field]: FieldValue.increment(1)
+    });
+
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
