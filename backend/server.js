@@ -1052,7 +1052,8 @@ app.post('/api/gigs', async (req, res) => {
     const gigData = {
       ...req.body,
       apply_count: req.body.apply_count !== undefined ? req.body.apply_count : 0,
-      share_count: req.body.share_count !== undefined ? req.body.share_count : 0
+      share_count: req.body.share_count !== undefined ? req.body.share_count : 0,
+      view_count: req.body.view_count !== undefined ? req.body.view_count : 0
     };
     const docRef = await db.collection('gigs').add(gigData);
     res.json({ id: docRef.id, ...gigData });
@@ -1077,6 +1078,7 @@ app.post('/api/gigs/public-submit', async (req, res) => {
       end_date: gigData.end_date || '',
       apply_count: 0,
       share_count: 0,
+      view_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -1092,7 +1094,7 @@ app.post('/api/gigs/:id/track', async (req, res) => {
   try {
     const { id } = req.params;
     const { action } = req.body;
-    const field = action === 'apply' ? 'apply_count' : action === 'share' ? 'share_count' : null;
+    const field = action === 'apply' ? 'apply_count' : action === 'share' ? 'share_count' : action === 'view' ? 'view_count' : null;
 
     if (!field) {
       return res.status(400).json({ error: 'Invalid action' });
