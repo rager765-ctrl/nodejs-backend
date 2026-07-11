@@ -1068,6 +1068,8 @@ app.post('/api/gigs/public-submit', async (req, res) => {
       apply_link: gigData.apply_link || '',
       is_hero: false,
       is_approved: false,
+      start_date: gigData.start_date || '',
+      end_date: gigData.end_date || '',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
