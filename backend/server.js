@@ -86,7 +86,8 @@ const cache = {
   gigs: [],
   feedbackConfig: [],
   feedbackSubmissions: [],
-  reviews: {} // productId -> reviews array
+  reviews: {}, // productId -> reviews array
+  fcmTokens: [] // Cached list of all FCM tokens (refreshed by listener)
 };
 
 // ─── Initialize Upstash Redis client ──────────────────────────
@@ -201,46 +202,62 @@ function getSafeTime(val) {
 }
 
 // ─── FCM Push Notification Service ──────────────────────────────
+// Admin tokens are cached in memory after first load, refreshed on change.
+let _cachedAdminTokens = [];
+let _adminTokensCachedAt = 0;
+const ADMIN_TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function getAdminTokens() {
+  const now = Date.now();
+  if (_cachedAdminTokens.length > 0 && (now - _adminTokensCachedAt) < ADMIN_TOKEN_TTL_MS) {
+    return _cachedAdminTokens;
+  }
+  if (!isFirebaseOnline || !db) return [];
+  const adminsSnap = await db.collection('users').where('role', '==', 'admin').get();
+  const tokens = [];
+  adminsSnap.forEach(doc => {
+    const data = doc.data();
+    if (data.fcmTokens && Array.isArray(data.fcmTokens)) tokens.push(...data.fcmTokens);
+  });
+  _cachedAdminTokens = [...new Set(tokens)].filter(Boolean);
+  _adminTokensCachedAt = now;
+  console.log(`[FCM Cache] Admin tokens refreshed. Count: ${_cachedAdminTokens.length}`);
+  return _cachedAdminTokens;
+}
+
 async function sendFCMPush(payload, targetRole = 'all') {
   if (!isFirebaseOnline || !db) return;
   try {
     let tokens = [];
 
     if (targetRole === 'admin') {
-      const adminsSnap = await db.collection('users').where('role', '==', 'admin').get();
-      adminsSnap.forEach(doc => {
-        const data = doc.data();
-        if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
-          tokens.push(...data.fcmTokens);
-        }
-      });
+      // ✅ Served from in-memory cache — no Firestore read unless stale
+      tokens = await getAdminTokens();
     } else if (targetRole === 'all') {
-      // Get all tokens from fcm_tokens collection (includes guests)
-      const tokensSnap = await db.collection('fcm_tokens').get();
-      tokensSnap.forEach(doc => {
-        const data = doc.data();
-        if (data.token) {
-          tokens.push(data.token);
-        }
-      });
+      // ✅ Served from the fcm_tokens cache populated by the live listener below
+      // (no full collection scan on every push!)
+      tokens = [...cache.fcmTokens];
+      if (tokens.length === 0) {
+        // One-time cold-start fetch if cache is empty
+        console.log('[FCM] Cold-start: fetching fcm_tokens once to populate cache...');
+        const tokensSnap = await db.collection('fcm_tokens').get();
+        tokensSnap.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
+        cache.fcmTokens = [...new Set(tokens)].filter(Boolean);
+      }
     } else {
       // Treat targetRole as a specific UID string
       // 1. Get tokens associated with this UID in fcm_tokens collection
       const tokensSnap = await db.collection('fcm_tokens').where('uid', '==', targetRole).get();
       tokensSnap.forEach(doc => {
         const data = doc.data();
-        if (data.token) {
-          tokens.push(data.token);
-        }
+        if (data.token) tokens.push(data.token);
       });
 
       // 2. Fallback to user's nested fcmTokens array
       const userDoc = await db.collection('users').doc(targetRole).get();
       if (userDoc.exists) {
         const data = userDoc.data();
-        if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
-          tokens.push(...data.fcmTokens);
-        }
+        if (data.fcmTokens && Array.isArray(data.fcmTokens)) tokens.push(...data.fcmTokens);
       }
     }
 
@@ -270,22 +287,16 @@ async function sendFCMPush(payload, targetRole = 'all') {
             const badToken = batch[idx];
             const errorCode = resp.error?.code;
             console.warn(`[FCM] Error sending to token ${badToken.substring(0, 15)}... :`, resp.error);
-            const PURGEABLE_ERRORS = [
-              'messaging/registration-token-not-registered',
-              'messaging/invalid-argument',
-              'messaging/third-party-auth-error',  // token registered under a different Firebase project
-              'messaging/invalid-registration-token'
-            ];
-            if (PURGEABLE_ERRORS.includes(errorCode)) {
-              console.log(`[FCM] Cleaning up stale/mismatched token (${errorCode}): ${badToken.substring(0, 20)}...`);
-              await db.collection('fcm_tokens').doc(badToken).delete().catch(() => {});
-              
-              const usersWithToken = await db.collection('users').where('fcmTokens', 'array-contains', badToken).get();
-              usersWithToken.forEach(async (uDoc) => {
-                await uDoc.ref.update({
-                  fcmTokens: FieldValue.arrayRemove(badToken)
-                }).catch(() => {});
-              });
+            if (errorCode === 'messaging/registration-token-not-registered' || errorCode === 'messaging/invalid-argument') {
+              console.log(`[FCM] Cleaning up invalid token: ${badToken}`);
+              // Remove from in-memory cache immediately
+              cache.fcmTokens = cache.fcmTokens.filter(t => t !== badToken);
+              _cachedAdminTokens = _cachedAdminTokens.filter(t => t !== badToken);
+              // Remove from Firestore (fire and forget)
+              db.collection('fcm_tokens').doc(badToken).delete().catch(() => {});
+              db.collection('users').where('fcmTokens', 'array-contains', badToken).get()
+                .then(snap => snap.forEach(uDoc => uDoc.ref.update({ fcmTokens: FieldValue.arrayRemove(badToken) }).catch(() => {})))
+                .catch(() => {});
             }
           }
         }
@@ -307,7 +318,8 @@ let unsubscribers = {
   broadcasts: null,
   gigs: null,
   userChats: null,
-  communications: null
+  communications: null,
+  fcmTokens: null
 };
 
 function setupBackgroundSync() {
@@ -552,34 +564,27 @@ function setupBackgroundSync() {
     });
 
   // 4. Live Settings Document Listener
-  let isInitialSettings = true;
   unsubscribers.settings = db.collection('settings').doc('global')
     .onSnapshot(async doc => {
       if (doc.exists) {
         console.log('[Firestore Sync] Global Settings document updated.');
-        const oldSettings = { ...cache.settings };
-        const newSettings = doc.data();
-        await setCacheValue(cacheKeys.settings, newSettings);
+        await setCacheValue(cacheKeys.settings, doc.data());
         io.emit('settings_changed', cache.settings);
-
-        if (isInitialSettings) {
-          isInitialSettings = false;
-          return;
-        }
-
-        // Detect if Force PWA Update Banner was toggled ON
-        if (newSettings.forcePwaUpdate && !oldSettings.forcePwaUpdate) {
-          sendFCMPush({
-            data: {
-              title: '⚡ New App Update Available!',
-              body: 'A fresh update has been deployed. Tap to reload and sync the latest features.',
-              url: '/'
-            }
-          }, 'all');
-        }
       }
     }, err => {
       console.error('[Firestore Sync] Settings snapshot failed:', err.message);
+    });
+
+  // FCM Tokens Live Listener — keeps cache.fcmTokens in sync so sendFCMPush
+  // never needs to scan the full fcm_tokens collection on every push.
+  unsubscribers.fcmTokens = db.collection('fcm_tokens')
+    .onSnapshot(snapshot => {
+      const tokens = [];
+      snapshot.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
+      cache.fcmTokens = [...new Set(tokens)].filter(Boolean);
+      console.log(`[Firestore Sync] fcm_tokens cache refreshed. Count: ${cache.fcmTokens.length}`);
+    }, err => {
+      console.error('[Firestore Sync] fcm_tokens snapshot failed:', err.message);
     });
 
   // 11. Live Food Categories Listener
@@ -954,20 +959,6 @@ app.post('/api/visitors/heartbeat', (req, res) => {
   res.json({ success: true, activeCount: activeVisitors.size });
 });
 
-// 7. Get Active Visitor Count
-app.get('/api/visitor-count', (req, res) => {
-  res.json({ count: activeVisitors.size });
-});
-
-// 7.5. Get Detailed Active Visitors
-app.get('/api/visitors/detailed', (req, res) => {
-  const visitors = Array.from(activeVisitors.entries()).map(([vid, data]) => ({
-    visitorId: vid,
-    ...data
-  }));
-  res.json({ count: visitors.length, visitors });
-});
-
 // 7.7. FCM Token Registration Proxy
 app.post('/api/fcm/register', async (req, res) => {
   if (!isFirebaseOnline || !db) {
@@ -980,13 +971,13 @@ app.post('/api/fcm/register', async (req, res) => {
   try {
     // 1. Save to fcm_tokens collection
     await db.collection('fcm_tokens').doc(token).set({
-      token,
+      token: token,
       uid: uid || 'guest',
       userAgent: userAgent || '',
       last_updated: FieldValue.serverTimestamp()
     }, { merge: true });
 
-    // 2. If user is logged in (has uid and not 'guest'), nest inside user doc
+    // 2. If uid is provided, arrayUnion into user's fcmTokens list
     if (uid && uid !== 'guest') {
       await db.collection('users').doc(uid).set({
         fcmTokens: FieldValue.arrayUnion(token)
@@ -1035,6 +1026,20 @@ app.post('/api/fcm/unregister', async (req, res) => {
   }
 });
 
+// 7. Get Active Visitor Count
+app.get('/api/visitor-count', (req, res) => {
+  res.json({ count: activeVisitors.size });
+});
+
+// 7.5. Get Detailed Active Visitors
+app.get('/api/visitors/detailed', (req, res) => {
+  const visitors = Array.from(activeVisitors.entries()).map(([vid, data]) => ({
+    visitorId: vid,
+    ...data
+  }));
+  res.json({ count: visitors.length, visitors });
+});
+
 // 8. Order Placement Proxy
 app.post('/api/orders', async (req, res) => {
   if (!isFirebaseOnline || !db) {
@@ -1051,23 +1056,24 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
-// 9. Admin Fetch Orders (Capped to 100 to prevent read explosion!)
-app.get('/api/orders', async (req, res) => {
+// 9. Admin Fetch Orders — served from in-memory cache (same as products/categories)
+// The live onSnapshot listener (setupBackgroundSync) keeps cache.orders fresh.
+app.get('/api/orders', (req, res) => {
+  if (cache.orders.length > 0) {
+    const limit = parseInt(req.query.limit) || 200;
+    return res.json(cache.orders.slice(0, limit));
+  }
+  // Cache is empty (server just started) — fall back to a one-time Firestore read
   if (!isFirebaseOnline || !db) {
     return res.status(503).json({ error: 'Database service is unavailable' });
   }
-  try {
-    const limit = parseInt(req.query.limit) || 100;
-    const snap = await db.collection('orders')
-      .orderBy('created_at', 'desc')
-      .limit(limit)
-      .get();
-    const orders = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    res.json(orders);
-  } catch (err) {
-    console.error('Failed to fetch orders:', err);
-    res.status(500).json({ error: err.message });
-  }
+  const limit = parseInt(req.query.limit) || 100;
+  db.collection('orders')
+    .orderBy('created_at', 'desc')
+    .limit(limit)
+    .get()
+    .then(snap => res.json(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))))
+    .catch(err => { console.error('Failed to fetch orders (cold start):', err); res.status(500).json({ error: err.message }); });
 });
 
 // 10. Fetch Product Reviews (With in-memory/Redis caching)
@@ -1188,6 +1194,89 @@ app.get('/api/reviews/user/:uid', async (req, res) => {
   } catch (err) {
     console.error('Failed to fetch user reviews:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Cloudinary Upload Proxy ──────────────────────────────────
+// Proxies image uploads to Cloudinary using server-side signed credentials.
+// Accepts JSON: { file: base64DataUrl|remoteUrl, cloudName?, uploadPreset? }
+// Returns:      { secure_url: string, public_id: string }
+app.post('/api/upload', async (req, res) => {
+  const { file, cloudName: clientCloudName, uploadPreset: clientPreset } = req.body || {};
+
+  if (!file) {
+    return res.status(400).json({ error: 'No file data provided' });
+  }
+
+  // ── Parse CLOUDINARY_URL if set (format: cloudinary://api_key:api_secret@cloud_name)
+  let cloudName    = clientCloudName || 'dcix8pa5a';
+  let apiKey       = '379252623331886';
+  let apiSecret    = '';
+  let uploadPreset = clientPreset    || 'j5l8qibi';
+
+  const cloudinaryUrl = process.env.CLOUDINARY_URL || '';
+  if (cloudinaryUrl.startsWith('cloudinary://')) {
+    try {
+      const parsed  = new URL(cloudinaryUrl);
+      apiKey        = parsed.username  || apiKey;
+      apiSecret     = parsed.password  || apiSecret;
+      cloudName     = parsed.hostname  || cloudName;
+      console.log(`[Cloudinary Proxy] Parsed CLOUDINARY_URL → cloud: ${cloudName}, key: ${apiKey.slice(0,6)}...`);
+    } catch (e) {
+      console.warn('[Cloudinary Proxy] Failed to parse CLOUDINARY_URL:', e.message);
+    }
+  } else {
+    // Fall back to individual env vars
+    cloudName    = process.env.CLOUDINARY_CLOUD_NAME    || cloudName;
+    apiKey       = process.env.CLOUDINARY_API_KEY       || apiKey;
+    apiSecret    = process.env.CLOUDINARY_API_SECRET    || apiSecret;
+    uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || uploadPreset;
+  }
+
+  const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+
+  try {
+    // Use native FormData (Node 18+ built-in — no extra packages needed)
+    const form = new FormData();
+    form.append('file', file);
+
+    if (apiSecret) {
+      // ── Signed Upload (preferred — no upload preset needed) ──
+      const timestamp = Math.round(Date.now() / 1000);
+
+      // Cloudinary signature: SHA-1 of "param1=value1&param2=value2..." + apiSecret
+      // Parameters must be sorted alphabetically, secret appended at the end (no separator)
+      const { createHash } = await import('crypto');
+      const strToSign = `timestamp=${timestamp}${apiSecret}`;
+      const signature  = createHash('sha1').update(strToSign).digest('hex');
+
+      form.append('api_key',   apiKey);
+      form.append('timestamp', String(timestamp));
+      form.append('signature', signature);
+
+      console.log(`[Cloudinary Proxy] Signed upload → cloud: ${cloudName}`);
+    } else {
+      // ── Unsigned Upload (preset must exist and be set to Unsigned) ──
+      form.append('upload_preset', uploadPreset);
+      console.log(`[Cloudinary Proxy] Unsigned upload → preset: ${uploadPreset}`);
+    }
+
+    // Node 18+ has global fetch — no node-fetch required
+    const response = await fetch(uploadUrl, { method: 'POST', body: form });
+    const data     = await response.json();
+
+    if (!response.ok || !data.secure_url) {
+      const errMsg = data?.error?.message || JSON.stringify(data);
+      console.error('[Cloudinary Proxy] Cloudinary rejected upload:', errMsg);
+      return res.status(response.status || 500).json({ error: errMsg });
+    }
+
+    console.log(`[Cloudinary Proxy] ✅ Upload OK: ${data.secure_url}`);
+    return res.json({ secure_url: data.secure_url, public_id: data.public_id });
+
+  } catch (err) {
+    console.error('[Cloudinary Proxy] Unexpected error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -1446,127 +1535,6 @@ app.delete('/api/gigs/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Cloudinary Signing Endpoint ─────────────────────────────
-// Returns a timestamp + SHA-1 signature so the browser can do a
-// SIGNED direct upload to Cloudinary without the image passing
-// through this server (avoids body-size limits entirely).
-// GET /api/cloudinary-sign → { timestamp, signature, apiKey, cloudName }
-app.get('/api/cloudinary-sign', async (req, res) => {
-  // ── Parse credentials from CLOUDINARY_URL or individual env vars ──
-  let cloudName = 'dcix8pa5a';
-  let apiKey    = '379252623331886';
-  let apiSecret = '';
-
-  const cloudinaryUrl = process.env.CLOUDINARY_URL || '';
-  if (cloudinaryUrl.startsWith('cloudinary://')) {
-    try {
-      const parsed = new URL(cloudinaryUrl);
-      apiKey    = parsed.username || apiKey;
-      apiSecret = parsed.password || apiSecret;
-      cloudName = parsed.hostname || cloudName;
-    } catch (e) {
-      console.warn('[Cloudinary Sign] Failed to parse CLOUDINARY_URL:', e.message);
-    }
-  } else {
-    cloudName = process.env.CLOUDINARY_CLOUD_NAME || cloudName;
-    apiKey    = process.env.CLOUDINARY_API_KEY    || apiKey;
-    apiSecret = process.env.CLOUDINARY_API_SECRET || apiSecret;
-  }
-
-  if (!apiSecret) {
-    console.error('[Cloudinary Sign] No API secret found. Set CLOUDINARY_URL on Render.');
-    return res.status(500).json({ error: 'Cloudinary API secret not configured on server. Set CLOUDINARY_URL env var.' });
-  }
-
-  const timestamp = Math.round(Date.now() / 1000);
-  const { createHash } = await import('crypto');
-  const strToSign = `timestamp=${timestamp}${apiSecret}`;
-  const signature = createHash('sha1').update(strToSign).digest('hex');
-
-  console.log(`[Cloudinary Sign] Issued signature for cloud: ${cloudName}, key: ${apiKey.slice(0, 6)}...`);
-  res.json({ timestamp, signature, apiKey, cloudName });
-});
-
-// ─── Cloudinary Upload Proxy ──────────────────────────────────
-// Proxies image uploads to Cloudinary using server-side signed credentials.
-// Accepts JSON: { file: base64DataUrl|remoteUrl, cloudName?, uploadPreset? }
-// Returns:      { secure_url: string, public_id: string }
-app.post('/api/upload', async (req, res) => {
-  const { file, cloudName: clientCloudName, uploadPreset: clientPreset } = req.body || {};
-
-  if (!file) {
-    return res.status(400).json({ error: 'No file data provided' });
-  }
-
-  // ── Parse CLOUDINARY_URL if set (format: cloudinary://api_key:api_secret@cloud_name)
-  let cloudName    = clientCloudName || 'dcix8pa5a';
-  let apiKey       = '379252623331886';
-  let apiSecret    = '';
-  let uploadPreset = clientPreset    || 'j5l8qibi';
-
-  const cloudinaryUrl = process.env.CLOUDINARY_URL || '';
-  if (cloudinaryUrl.startsWith('cloudinary://')) {
-    try {
-      const parsed  = new URL(cloudinaryUrl);
-      apiKey        = parsed.username  || apiKey;
-      apiSecret     = parsed.password  || apiSecret;
-      cloudName     = parsed.hostname  || cloudName;
-      console.log(`[Cloudinary Proxy] Parsed CLOUDINARY_URL → cloud: ${cloudName}, key: ${apiKey.slice(0,6)}...`);
-    } catch (e) {
-      console.warn('[Cloudinary Proxy] Failed to parse CLOUDINARY_URL:', e.message);
-    }
-  } else {
-    // Fall back to individual env vars
-    cloudName    = process.env.CLOUDINARY_CLOUD_NAME    || cloudName;
-    apiKey       = process.env.CLOUDINARY_API_KEY       || apiKey;
-    apiSecret    = process.env.CLOUDINARY_API_SECRET    || apiSecret;
-    uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || uploadPreset;
-  }
-
-  const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
-
-  try {
-    // Use native FormData (Node 18+ built-in — no extra packages needed)
-    const form = new FormData();
-    form.append('file', file);
-
-    if (apiSecret) {
-      // ── Signed Upload (preferred — no upload preset needed) ──
-      const timestamp = Math.round(Date.now() / 1000);
-      const { createHash } = await import('crypto');
-      const strToSign = `timestamp=${timestamp}${apiSecret}`;
-      const signature  = createHash('sha1').update(strToSign).digest('hex');
-
-      form.append('api_key',   apiKey);
-      form.append('timestamp', String(timestamp));
-      form.append('signature', signature);
-
-      console.log(`[Cloudinary Proxy] Signed upload → cloud: ${cloudName}`);
-    } else {
-      // ── Unsigned Upload (preset must exist and be set to Unsigned) ──
-      form.append('upload_preset', uploadPreset);
-      console.log(`[Cloudinary Proxy] Unsigned upload → preset: ${uploadPreset}`);
-    }
-
-    // Node 18+ has global fetch — no node-fetch required
-    const response = await fetch(uploadUrl, { method: 'POST', body: form });
-    const data     = await response.json();
-
-    if (!response.ok || !data.secure_url) {
-      const errMsg = data?.error?.message || JSON.stringify(data);
-      console.error('[Cloudinary Proxy] Cloudinary rejected upload:', errMsg);
-      return res.status(response.status || 500).json({ error: errMsg });
-    }
-
-    console.log(`[Cloudinary Proxy] ✅ Upload OK: ${data.secure_url}`);
-    return res.json({ secure_url: data.secure_url, public_id: data.public_id });
-
-  } catch (err) {
-    console.error('[Cloudinary Proxy] Unexpected error:', err.message);
-    return res.status(500).json({ error: err.message });
   }
 });
 
