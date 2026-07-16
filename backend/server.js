@@ -347,14 +347,14 @@ function setupBackgroundSync() {
           const oldOrder = previousOrders.find(o => o.id === change.doc.id);
           if (oldOrder && oldOrder.status !== order.status && order.status) {
              // Order status changed! Notify the specific user!
-             if (order.uid) {
+             if (order.customer_uid) {
                sendFCMPush({
                  notification: {
                    title: `📦 Order Update: ${order.status.toUpperCase()}`,
                    body: `Your order #${order.order_id || change.doc.id} status is now ${order.status}.`,
                  },
                  data: { url: '/account.html?tab=orders' }
-               }, order.uid);
+               }, order.customer_uid);
              }
           }
         }
