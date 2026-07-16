@@ -213,15 +213,26 @@ async function sendFCMPush(payload, targetRole = 'all') {
         }
       });
     } else if (targetRole === 'all') {
-      const usersSnap = await db.collection('users').get();
-      usersSnap.forEach(doc => {
+      // Get all tokens from fcm_tokens collection (includes guests)
+      const tokensSnap = await db.collection('fcm_tokens').get();
+      tokensSnap.forEach(doc => {
         const data = doc.data();
-        if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
-          tokens.push(...data.fcmTokens);
+        if (data.token) {
+          tokens.push(data.token);
         }
       });
     } else {
       // Treat targetRole as a specific UID string
+      // 1. Get tokens associated with this UID in fcm_tokens collection
+      const tokensSnap = await db.collection('fcm_tokens').where('uid', '==', targetRole).get();
+      tokensSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.token) {
+          tokens.push(data.token);
+        }
+      });
+
+      // 2. Fallback to user's nested fcmTokens array
       const userDoc = await db.collection('users').doc(targetRole).get();
       if (userDoc.exists) {
         const data = userDoc.data();
@@ -249,8 +260,27 @@ async function sendFCMPush(payload, targetRole = 'all') {
       const response = await messaging.sendEachForMulticast(message);
       console.log(`[FCM] Push sent: ${response.successCount} successful, ${response.failureCount} failed.`);
       
-      // Cleanup invalid tokens is a bit trickier with arrays, 
-      // but typically we can ignore it for now or implement an arrayRemove.
+      // Cleanup invalid tokens
+      if (response.failureCount > 0) {
+        for (let idx = 0; idx < response.responses.length; idx++) {
+          const resp = response.responses[idx];
+          if (!resp.success) {
+            const badToken = batch[idx];
+            const errorCode = resp.error?.code;
+            if (errorCode === 'messaging/registration-token-not-registered' || errorCode === 'messaging/invalid-argument') {
+              console.log(`[FCM] Cleaning up invalid token: ${badToken}`);
+              await db.collection('fcm_tokens').doc(badToken).delete().catch(() => {});
+              
+              const usersWithToken = await db.collection('users').where('fcmTokens', 'array-contains', badToken).get();
+              usersWithToken.forEach(async (uDoc) => {
+                await uDoc.ref.update({
+                  fcmTokens: FieldValue.arrayRemove(badToken)
+                }).catch(() => {});
+              });
+            }
+          }
+        }
+      }
     }
   } catch (err) {
     console.error('[FCM] Error sending push notification:', err);
