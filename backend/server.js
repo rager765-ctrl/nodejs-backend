@@ -267,6 +267,7 @@ async function sendFCMPush(payload, targetRole = 'all') {
           if (!resp.success) {
             const badToken = batch[idx];
             const errorCode = resp.error?.code;
+            console.warn(`[FCM] Error sending to token ${badToken.substring(0, 15)}... :`, resp.error);
             if (errorCode === 'messaging/registration-token-not-registered' || errorCode === 'messaging/invalid-argument') {
               console.log(`[FCM] Cleaning up invalid token: ${badToken}`);
               await db.collection('fcm_tokens').doc(badToken).delete().catch(() => {});
@@ -295,7 +296,10 @@ let unsubscribers = {
   settings: null,
   blogPosts: null,
   promoCodes: null,
-  broadcasts: null
+  broadcasts: null,
+  gigs: null,
+  userChats: null,
+  communications: null
 };
 
 function setupBackgroundSync() {
@@ -332,12 +336,31 @@ function setupBackgroundSync() {
     });
 
   // 3. Live Sellers Listener
+  let isInitialSellers = true;
   unsubscribers.sellers = db.collection('sellers')
     .onSnapshot(async snapshot => {
       console.log(`[Firestore Sync] sellers collection updated. Syncing ${snapshot.size} items.`);
       const sellers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       await setCacheValue(cacheKeys.sellers, sellers);
       io.emit('sellers_changed', cache.sellers);
+
+      if (isInitialSellers) {
+        isInitialSellers = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const seller = change.doc.data();
+          sendFCMPush({
+            data: {
+              title: '🏪 New Seller Registered!',
+              body: `Store "${seller.name || 'Unnamed Store'}" (${seller.phone || 'No Phone'}) has registered.`,
+              url: '/admin-sellers.html'
+            }
+          }, 'admin');
+        }
+      });
     }, err => {
       console.error('[Firestore Sync] Sellers snapshot failed:', err.message);
     });
@@ -365,25 +388,48 @@ function setupBackgroundSync() {
         const order = change.doc.data();
         
         if (change.type === 'added') {
+          // Notify Admin
           sendFCMPush({
             data: {
-              title: '\uD83D\uDD14 New Order Received!',
-              body: `Order #${order.order_id || change.doc.id} for GH\u20B5 ${Number(order.total_amount).toFixed(2)}`,
+              title: '🔔 New Order Received!',
+              body: `Order ${order.order_label || order.order_number || ('#' + change.doc.id)} for GH₵ ${Number(order.total_amount || order.total_price || 0).toFixed(2)}`,
               url: '/admin-orders.html'
             }
           }, 'admin');
+
+          // Notify Seller (if order belongs to a seller store)
+          if (order.seller_id && order.seller_id !== 'main') {
+            sendFCMPush({
+              data: {
+                title: '🛍️ New Order Received!',
+                body: `You received order ${order.order_label || order.order_number || ('#' + change.doc.id)} for GH₵ ${Number(order.total_amount || order.total_price || 0).toFixed(2)}`,
+                url: '/seller-dashboard.html?tab=orders'
+              }
+            }, order.seller_id);
+          }
         } 
         else if (change.type === 'modified') {
           const oldOrder = previousOrders.find(o => o.id === change.doc.id);
           if (oldOrder && oldOrder.status !== order.status && order.status) {
+             // Notify Customer
              if (order.customer_uid) {
                sendFCMPush({
                  data: {
-                   title: `\uD83D\uDCE6 Order Update: ${order.status.toUpperCase()}`,
-                   body: `Your order #${order.order_id || change.doc.id} status is now ${order.status}.`,
+                   title: `📦 Order Update: ${order.status.toUpperCase()}`,
+                   body: `Your order ${order.order_label || order.order_number || ('#' + change.doc.id)} status is now ${order.status}.`,
                    url: '/account.html?tab=orders'
                  }
                }, order.customer_uid);
+             }
+             // Notify Seller
+             if (order.seller_id && order.seller_id !== 'main') {
+               sendFCMPush({
+                 data: {
+                   title: `📦 Order Update: ${order.status.toUpperCase()}`,
+                   body: `Order ${order.order_label || order.order_number || ('#' + change.doc.id)} status is now ${order.status}.`,
+                   url: '/seller-dashboard.html?tab=orders'
+                 }
+               }, order.seller_id);
              }
           }
         }
@@ -393,6 +439,7 @@ function setupBackgroundSync() {
     });
 
   // 5. Live Blog Posts Listener
+  let isInitialBlogPosts = true;
   unsubscribers.blogPosts = db.collection('blog_posts')
     .onSnapshot(async snapshot => {
       console.log(`[Firestore Sync] blog_posts collection updated. Syncing ${snapshot.size} items.`);
@@ -400,6 +447,25 @@ function setupBackgroundSync() {
       blogPosts.sort((a, b) => getSafeTime(b.created_at || b.date) - getSafeTime(a.created_at || a.date));
       await setCacheValue(cacheKeys.blogPosts, blogPosts);
       io.emit('blog_posts_changed', cache.blogPosts);
+
+      if (isInitialBlogPosts) {
+        isInitialBlogPosts = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const post = change.doc.data();
+          sendFCMPush({
+            data: {
+              title: '📖 New Journal Entry Published!',
+              body: post.title || 'Check out our latest update in the journal.',
+              image_url: post.image_url || '',
+              url: '/blog.html'
+            }
+          }, 'all');
+        }
+      });
     }, err => {
       console.error('[Firestore Sync] Blog posts snapshot failed:', err.message);
     });
@@ -547,15 +613,130 @@ function setupBackgroundSync() {
     });
 
   // 16. Live Gigs Listener
+  let isInitialGigs = true;
   unsubscribers.gigs = db.collection('gigs')
     .onSnapshot(async snapshot => {
+      const previousGigs = [...cache.gigs];
       console.log(`[Firestore Sync] gigs updated. Syncing ${snapshot.size} items.`);
       const gigs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       gigs.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
       await setCacheValue(cacheKeys.gigs, gigs);
       io.emit('gigs_changed', cache.gigs);
+
+      if (isInitialGigs) {
+        isInitialGigs = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        const gig = change.doc.data();
+        if (change.type === 'added') {
+          if (gig.is_approved !== false) {
+            sendFCMPush({
+              data: {
+                title: '💼 New Opportunity Posted!',
+                body: gig.title || 'A new opportunity is now available.',
+                image_url: gig.image_url || '',
+                url: '/gigs.html'
+              }
+            }, 'all');
+          }
+        } else if (change.type === 'modified') {
+          const oldGig = previousGigs.find(g => g.id === change.doc.id);
+          if (oldGig && !oldGig.is_approved && gig.is_approved) {
+            sendFCMPush({
+              data: {
+                title: '💼 New Opportunity Approved!',
+                body: gig.title || 'A new opportunity is now available.',
+                image_url: gig.image_url || '',
+                url: '/gigs.html'
+              }
+            }, 'all');
+          }
+        }
+      });
     }, err => {
       console.error('[Firestore Sync] Gigs snapshot failed:', err.message);
+    });
+
+  // 17. Live User Chats Listener
+  let isInitialChats = true;
+  unsubscribers.userChats = db.collection('user_chats')
+    .orderBy('created_at', 'desc')
+    .limit(20)
+    .onSnapshot(snapshot => {
+      if (isInitialChats) {
+        isInitialChats = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const chat = change.doc.data();
+          if (chat.sender === 'admin') {
+            sendFCMPush({
+              data: {
+                title: `💬 Message from ${chat.sender_name || 'Kwabz Support'}`,
+                body: chat.message || 'Sent an image.',
+                image_url: chat.image_url || '',
+                url: '/account.html?tab=chat'
+              }
+            }, chat.user_id);
+          } else if (chat.sender === 'user') {
+            sendFCMPush({
+              data: {
+                title: `💬 New Message from ${chat.sender_name || 'Customer'}`,
+                body: chat.message || 'Sent an image.',
+                image_url: chat.image_url || '',
+                url: `/admin-chat.html?uid=${chat.user_id}`
+              }
+            }, 'admin');
+          }
+        }
+      });
+    }, err => {
+      console.error('[Firestore Sync] User chats snapshot failed:', err.message);
+    });
+
+  // 18. Live Communications Listener (Admin-Seller Chat)
+  let isInitialCommunications = true;
+  unsubscribers.communications = db.collection('communications')
+    .orderBy('timestamp', 'desc')
+    .limit(20)
+    .onSnapshot(snapshot => {
+      if (isInitialCommunications) {
+        isInitialCommunications = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const msg = change.doc.data();
+          if (msg.type === 'broadcast') return;
+          
+          if (msg.sender_id === 'admin') {
+            sendFCMPush({
+              data: {
+                title: '💬 Message from Kwabz Admin',
+                body: msg.message || 'Sent an image.',
+                image_url: msg.image_url || '',
+                url: '/seller-dashboard.html?tab=support'
+              }
+            }, msg.receiver_id);
+          } else {
+            sendFCMPush({
+              data: {
+                title: `💬 Seller Message: ${msg.sender_name || 'Seller'}`,
+                body: msg.message || 'Sent an image.',
+                image_url: msg.image_url || '',
+                url: `/admin-sellers.html?chat=${msg.conversation_id}`
+              }
+            }, 'admin');
+          }
+        }
+      });
+    }, err => {
+      console.error('[Firestore Sync] Communications snapshot failed:', err.message);
     });
 }
 
