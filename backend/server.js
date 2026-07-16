@@ -268,14 +268,8 @@ async function sendFCMPush(payload, targetRole = 'all') {
             const badToken = batch[idx];
             const errorCode = resp.error?.code;
             console.warn(`[FCM] Error sending to token ${badToken.substring(0, 15)}... :`, resp.error);
-            const PURGEABLE_ERRORS = [
-              'messaging/registration-token-not-registered',
-              'messaging/invalid-argument',
-              'messaging/third-party-auth-error',  // token registered under a different Firebase project
-              'messaging/invalid-registration-token'
-            ];
-            if (PURGEABLE_ERRORS.includes(errorCode)) {
-              console.log(`[FCM] Cleaning up stale/mismatched token (${errorCode}): ${badToken.substring(0, 20)}...`);
+            if (errorCode === 'messaging/registration-token-not-registered' || errorCode === 'messaging/invalid-argument') {
+              console.log(`[FCM] Cleaning up invalid token: ${badToken}`);
               await db.collection('fcm_tokens').doc(badToken).delete().catch(() => {});
               
               const usersWithToken = await db.collection('users').where('fcmTokens', 'array-contains', badToken).get();
@@ -550,31 +544,12 @@ function setupBackgroundSync() {
     });
 
   // 4. Live Settings Document Listener
-  let isInitialSettings = true;
   unsubscribers.settings = db.collection('settings').doc('global')
     .onSnapshot(async doc => {
       if (doc.exists) {
         console.log('[Firestore Sync] Global Settings document updated.');
-        const oldSettings = { ...cache.settings };
-        const newSettings = doc.data();
-        await setCacheValue(cacheKeys.settings, newSettings);
+        await setCacheValue(cacheKeys.settings, doc.data());
         io.emit('settings_changed', cache.settings);
-
-        if (isInitialSettings) {
-          isInitialSettings = false;
-          return;
-        }
-
-        // Detect if Force PWA Update Banner was toggled ON
-        if (newSettings.forcePwaUpdate && !oldSettings.forcePwaUpdate) {
-          sendFCMPush({
-            data: {
-              title: '⚡ New App Update Available!',
-              body: 'A fresh update has been deployed. Tap to reload and sync the latest features.',
-              url: '/'
-            }
-          }, 'all');
-        }
       }
     }, err => {
       console.error('[Firestore Sync] Settings snapshot failed:', err.message);
@@ -952,20 +927,6 @@ app.post('/api/visitors/heartbeat', (req, res) => {
   res.json({ success: true, activeCount: activeVisitors.size });
 });
 
-// 7. Get Active Visitor Count
-app.get('/api/visitor-count', (req, res) => {
-  res.json({ count: activeVisitors.size });
-});
-
-// 7.5. Get Detailed Active Visitors
-app.get('/api/visitors/detailed', (req, res) => {
-  const visitors = Array.from(activeVisitors.entries()).map(([vid, data]) => ({
-    visitorId: vid,
-    ...data
-  }));
-  res.json({ count: visitors.length, visitors });
-});
-
 // 7.7. FCM Token Registration Proxy
 app.post('/api/fcm/register', async (req, res) => {
   if (!isFirebaseOnline || !db) {
@@ -978,13 +939,13 @@ app.post('/api/fcm/register', async (req, res) => {
   try {
     // 1. Save to fcm_tokens collection
     await db.collection('fcm_tokens').doc(token).set({
-      token,
+      token: token,
       uid: uid || 'guest',
       userAgent: userAgent || '',
       last_updated: FieldValue.serverTimestamp()
     }, { merge: true });
 
-    // 2. If user is logged in (has uid and not 'guest'), nest inside user doc
+    // 2. If uid is provided, arrayUnion into user's fcmTokens list
     if (uid && uid !== 'guest') {
       await db.collection('users').doc(uid).set({
         fcmTokens: FieldValue.arrayUnion(token)
@@ -1031,6 +992,20 @@ app.post('/api/fcm/unregister', async (req, res) => {
     console.error('[FCM Proxy] Error unregistering token:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// 7. Get Active Visitor Count
+app.get('/api/visitor-count', (req, res) => {
+  res.json({ count: activeVisitors.size });
+});
+
+// 7.5. Get Detailed Active Visitors
+app.get('/api/visitors/detailed', (req, res) => {
+  const visitors = Array.from(activeVisitors.entries()).map(([vid, data]) => ({
+    visitorId: vid,
+    ...data
+  }));
+  res.json({ count: visitors.length, visitors });
 });
 
 // 8. Order Placement Proxy
