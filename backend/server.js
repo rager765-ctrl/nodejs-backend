@@ -18,7 +18,9 @@ const SERVICE_ACCOUNT_PATH = process.env.FIREBASE_SERVICE_ACCOUNT || './firebase
 
 const app = express();
 app.use(cors({ origin: '*' }));
-app.use(express.json());
+// Allow large JSON bodies for base64 image uploads (up to 20 MB)
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -1165,9 +1167,9 @@ app.get('/api/reviews/user/:uid', async (req, res) => {
 });
 
 // ─── Cloudinary Upload Proxy ──────────────────────────────────
-// Proxies image uploads to Cloudinary using server-side credentials.
-// Accepts: { file: base64DataUrl|url, cloudName?, uploadPreset? }
-// Returns: { secure_url: string }
+// Proxies image uploads to Cloudinary using server-side signed credentials.
+// Accepts JSON: { file: base64DataUrl|remoteUrl, cloudName?, uploadPreset? }
+// Returns:      { secure_url: string, public_id: string }
 app.post('/api/upload', async (req, res) => {
   const { file, cloudName: clientCloudName, uploadPreset: clientPreset } = req.body || {};
 
@@ -1175,67 +1177,50 @@ app.post('/api/upload', async (req, res) => {
     return res.status(400).json({ error: 'No file data provided' });
   }
 
-  const cloudName    = process.env.CLOUDINARY_CLOUD_NAME || clientCloudName || 'dcix8pa5a';
-  const apiKey       = process.env.CLOUDINARY_API_KEY    || '379252623331886';
-  const apiSecret    = process.env.CLOUDINARY_API_SECRET || '';
-  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || clientPreset || 'j5l8qibi';
+  const cloudName    = process.env.CLOUDINARY_CLOUD_NAME    || clientCloudName || 'dcix8pa5a';
+  const apiKey       = process.env.CLOUDINARY_API_KEY       || '379252623331886';
+  const apiSecret    = process.env.CLOUDINARY_API_SECRET    || '';
+  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || clientPreset    || 'j5l8qibi';
 
   const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
 
   try {
-    let body;
-    let headers = {};
+    // Use native FormData (Node 18+ built-in — no extra packages needed)
+    const form = new FormData();
+    form.append('file', file);
 
     if (apiSecret) {
-      // ── Signed Upload (preferred — no preset needed) ──────────
+      // ── Signed Upload (preferred — no upload preset needed) ──
       const timestamp = Math.round(Date.now() / 1000);
 
-      // Build the string to sign
-      const strToSign = `timestamp=${timestamp}${apiSecret}`;
-
-      // SHA-1 via Node.js crypto
+      // Cloudinary signature: SHA-1 of "param1=value1&param2=value2..." + apiSecret
+      // Parameters must be sorted alphabetically, secret appended at the end (no separator)
       const { createHash } = await import('crypto');
-      const signature = createHash('sha1').update(strToSign).digest('hex');
+      const strToSign = `timestamp=${timestamp}${apiSecret}`;
+      const signature  = createHash('sha1').update(strToSign).digest('hex');
 
-      const params = new URLSearchParams();
-      params.append('file',      file);
-      params.append('timestamp', String(timestamp));
-      params.append('api_key',   apiKey);
-      params.append('signature', signature);
+      form.append('api_key',   apiKey);
+      form.append('timestamp', String(timestamp));
+      form.append('signature', signature);
 
-      body    = params;
-      headers = {}; // URLSearchParams sets its own content-type
-
-      console.log(`[Cloudinary Proxy] Attempting signed upload to cloud: ${cloudName}`);
+      console.log(`[Cloudinary Proxy] Signed upload → cloud: ${cloudName}`);
     } else {
-      // ── Unsigned Upload (preset required) ────────────────────
-      const params = new URLSearchParams();
-      params.append('file',          file);
-      params.append('upload_preset', uploadPreset);
-
-      body = params;
-
-      console.log(`[Cloudinary Proxy] Attempting unsigned upload with preset: ${uploadPreset}`);
+      // ── Unsigned Upload (preset must exist and be set to Unsigned) ──
+      form.append('upload_preset', uploadPreset);
+      console.log(`[Cloudinary Proxy] Unsigned upload → preset: ${uploadPreset}`);
     }
 
-    const fetchModule = await import('node-fetch').catch(() => null);
-    const fetchFn     = fetchModule ? fetchModule.default : fetch;
-
-    const response = await fetchFn(uploadUrl, {
-      method:  'POST',
-      body,
-      headers,
-    });
-
-    const data = await response.json();
+    // Node 18+ has global fetch — no node-fetch required
+    const response = await fetch(uploadUrl, { method: 'POST', body: form });
+    const data     = await response.json();
 
     if (!response.ok || !data.secure_url) {
       const errMsg = data?.error?.message || JSON.stringify(data);
-      console.error('[Cloudinary Proxy] Upload rejected by Cloudinary:', errMsg);
+      console.error('[Cloudinary Proxy] Cloudinary rejected upload:', errMsg);
       return res.status(response.status || 500).json({ error: errMsg });
     }
 
-    console.log(`[Cloudinary Proxy] Upload successful: ${data.secure_url}`);
+    console.log(`[Cloudinary Proxy] ✅ Upload OK: ${data.secure_url}`);
     return res.json({ secure_url: data.secure_url, public_id: data.public_id });
 
   } catch (err) {
