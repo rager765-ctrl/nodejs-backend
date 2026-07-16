@@ -18,7 +18,9 @@ const SERVICE_ACCOUNT_PATH = process.env.FIREBASE_SERVICE_ACCOUNT || './firebase
 
 const app = express();
 app.use(cors({ origin: '*' }));
-app.use(express.json());
+// Allow large JSON bodies for base64 image uploads (up to 20 MB)
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -213,15 +215,26 @@ async function sendFCMPush(payload, targetRole = 'all') {
         }
       });
     } else if (targetRole === 'all') {
-      const usersSnap = await db.collection('users').get();
-      usersSnap.forEach(doc => {
+      // Get all tokens from fcm_tokens collection (includes guests)
+      const tokensSnap = await db.collection('fcm_tokens').get();
+      tokensSnap.forEach(doc => {
         const data = doc.data();
-        if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
-          tokens.push(...data.fcmTokens);
+        if (data.token) {
+          tokens.push(data.token);
         }
       });
     } else {
       // Treat targetRole as a specific UID string
+      // 1. Get tokens associated with this UID in fcm_tokens collection
+      const tokensSnap = await db.collection('fcm_tokens').where('uid', '==', targetRole).get();
+      tokensSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.token) {
+          tokens.push(data.token);
+        }
+      });
+
+      // 2. Fallback to user's nested fcmTokens array
       const userDoc = await db.collection('users').doc(targetRole).get();
       if (userDoc.exists) {
         const data = userDoc.data();
@@ -249,8 +262,28 @@ async function sendFCMPush(payload, targetRole = 'all') {
       const response = await messaging.sendEachForMulticast(message);
       console.log(`[FCM] Push sent: ${response.successCount} successful, ${response.failureCount} failed.`);
       
-      // Cleanup invalid tokens is a bit trickier with arrays, 
-      // but typically we can ignore it for now or implement an arrayRemove.
+      // Cleanup invalid tokens
+      if (response.failureCount > 0) {
+        for (let idx = 0; idx < response.responses.length; idx++) {
+          const resp = response.responses[idx];
+          if (!resp.success) {
+            const badToken = batch[idx];
+            const errorCode = resp.error?.code;
+            console.warn(`[FCM] Error sending to token ${badToken.substring(0, 15)}... :`, resp.error);
+            if (errorCode === 'messaging/registration-token-not-registered' || errorCode === 'messaging/invalid-argument') {
+              console.log(`[FCM] Cleaning up invalid token: ${badToken}`);
+              await db.collection('fcm_tokens').doc(badToken).delete().catch(() => {});
+              
+              const usersWithToken = await db.collection('users').where('fcmTokens', 'array-contains', badToken).get();
+              usersWithToken.forEach(async (uDoc) => {
+                await uDoc.ref.update({
+                  fcmTokens: FieldValue.arrayRemove(badToken)
+                }).catch(() => {});
+              });
+            }
+          }
+        }
+      }
     }
   } catch (err) {
     console.error('[FCM] Error sending push notification:', err);
@@ -265,7 +298,10 @@ let unsubscribers = {
   settings: null,
   blogPosts: null,
   promoCodes: null,
-  broadcasts: null
+  broadcasts: null,
+  gigs: null,
+  userChats: null,
+  communications: null
 };
 
 function setupBackgroundSync() {
@@ -302,12 +338,31 @@ function setupBackgroundSync() {
     });
 
   // 3. Live Sellers Listener
+  let isInitialSellers = true;
   unsubscribers.sellers = db.collection('sellers')
     .onSnapshot(async snapshot => {
       console.log(`[Firestore Sync] sellers collection updated. Syncing ${snapshot.size} items.`);
       const sellers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       await setCacheValue(cacheKeys.sellers, sellers);
       io.emit('sellers_changed', cache.sellers);
+
+      if (isInitialSellers) {
+        isInitialSellers = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const seller = change.doc.data();
+          sendFCMPush({
+            data: {
+              title: '🏪 New Seller Registered!',
+              body: `Store "${seller.name || 'Unnamed Store'}" (${seller.phone || 'No Phone'}) has registered.`,
+              url: '/admin-sellers.html'
+            }
+          }, 'admin');
+        }
+      });
     }, err => {
       console.error('[Firestore Sync] Sellers snapshot failed:', err.message);
     });
@@ -335,26 +390,48 @@ function setupBackgroundSync() {
         const order = change.doc.data();
         
         if (change.type === 'added') {
+          // Notify Admin
           sendFCMPush({
-            notification: {
+            data: {
               title: '🔔 New Order Received!',
-              body: `Order #${order.order_id || change.doc.id} for GH₵ ${Number(order.total_amount).toFixed(2)}`,
-            },
-            data: { url: '/admin-orders.html' }
+              body: `Order ${order.order_label || order.order_number || ('#' + change.doc.id)} for GH₵ ${Number(order.total_amount || order.total_price || 0).toFixed(2)}`,
+              url: '/admin-orders.html'
+            }
           }, 'admin');
+
+          // Notify Seller (if order belongs to a seller store)
+          if (order.seller_id && order.seller_id !== 'main') {
+            sendFCMPush({
+              data: {
+                title: '🛍️ New Order Received!',
+                body: `You received order ${order.order_label || order.order_number || ('#' + change.doc.id)} for GH₵ ${Number(order.total_amount || order.total_price || 0).toFixed(2)}`,
+                url: '/seller-dashboard.html?tab=orders'
+              }
+            }, order.seller_id);
+          }
         } 
         else if (change.type === 'modified') {
           const oldOrder = previousOrders.find(o => o.id === change.doc.id);
           if (oldOrder && oldOrder.status !== order.status && order.status) {
-             // Order status changed! Notify the specific user!
+             // Notify Customer
              if (order.customer_uid) {
                sendFCMPush({
-                 notification: {
+                 data: {
                    title: `📦 Order Update: ${order.status.toUpperCase()}`,
-                   body: `Your order #${order.order_id || change.doc.id} status is now ${order.status}.`,
-                 },
-                 data: { url: '/account.html?tab=orders' }
+                   body: `Your order ${order.order_label || order.order_number || ('#' + change.doc.id)} status is now ${order.status}.`,
+                   url: '/account.html?tab=orders'
+                 }
                }, order.customer_uid);
+             }
+             // Notify Seller
+             if (order.seller_id && order.seller_id !== 'main') {
+               sendFCMPush({
+                 data: {
+                   title: `📦 Order Update: ${order.status.toUpperCase()}`,
+                   body: `Order ${order.order_label || order.order_number || ('#' + change.doc.id)} status is now ${order.status}.`,
+                   url: '/seller-dashboard.html?tab=orders'
+                 }
+               }, order.seller_id);
              }
           }
         }
@@ -364,6 +441,7 @@ function setupBackgroundSync() {
     });
 
   // 5. Live Blog Posts Listener
+  let isInitialBlogPosts = true;
   unsubscribers.blogPosts = db.collection('blog_posts')
     .onSnapshot(async snapshot => {
       console.log(`[Firestore Sync] blog_posts collection updated. Syncing ${snapshot.size} items.`);
@@ -371,6 +449,25 @@ function setupBackgroundSync() {
       blogPosts.sort((a, b) => getSafeTime(b.created_at || b.date) - getSafeTime(a.created_at || a.date));
       await setCacheValue(cacheKeys.blogPosts, blogPosts);
       io.emit('blog_posts_changed', cache.blogPosts);
+
+      if (isInitialBlogPosts) {
+        isInitialBlogPosts = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const post = change.doc.data();
+          sendFCMPush({
+            data: {
+              title: '📖 New Journal Entry Published!',
+              body: post.title || 'Check out our latest update in the journal.',
+              image_url: post.image_url || '',
+              url: '/blog.html'
+            }
+          }, 'all');
+        }
+      });
     }, err => {
       console.error('[Firestore Sync] Blog posts snapshot failed:', err.message);
     });
@@ -406,12 +503,12 @@ function setupBackgroundSync() {
         if (change.type === 'added') {
           const broadcast = change.doc.data();
           sendFCMPush({
-            notification: {
-              title: '📢 Announcement from Kwabz Store!',
+            data: {
+              title: '\uD83D\uDCE2 Announcement from Kwabz Store!',
               body: broadcast.message || 'Check out our latest update.',
-              image: broadcast.image_url || ''
-            },
-            data: { url: '/account.html?tab=announcements' }
+              image_url: broadcast.image_url || '',
+              url: '/account.html?tab=announcements'
+            }
           }, 'all');
         }
       });
@@ -432,14 +529,12 @@ function setupBackgroundSync() {
       snapshot.docChanges().forEach(change => {
         if (change.type === 'added') {
           const data = change.doc.data();
-          const discStr = data.discount > 0 ? ` — ${data.discount}% OFF!` : '';
+          const discStr = data.discount > 0 ? ` \u2014 ${data.discount}% OFF!` : '';
           sendFCMPush({
-            notification: {
-              title: '🛍️ New Arrival at Kwabz Store!',
-              body: `${data.name}${discStr} | GH₵ ${Number(data.price).toFixed(2)}`,
-              image: data.image_url || ''
-            },
             data: {
+              title: '\uD83D\uDED2 New Arrival at Kwabz Store!',
+              body: `${data.name}${discStr} | GH\u20B5 ${Number(data.price).toFixed(2)}`,
+              image_url: data.image_url || '',
               product_id: data.product_id || '',
               url: data.product_id ? `/product-detail.html?id=${data.product_id}` : '/shop.html'
             }
@@ -520,15 +615,130 @@ function setupBackgroundSync() {
     });
 
   // 16. Live Gigs Listener
+  let isInitialGigs = true;
   unsubscribers.gigs = db.collection('gigs')
     .onSnapshot(async snapshot => {
+      const previousGigs = [...cache.gigs];
       console.log(`[Firestore Sync] gigs updated. Syncing ${snapshot.size} items.`);
       const gigs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       gigs.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
       await setCacheValue(cacheKeys.gigs, gigs);
       io.emit('gigs_changed', cache.gigs);
+
+      if (isInitialGigs) {
+        isInitialGigs = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        const gig = change.doc.data();
+        if (change.type === 'added') {
+          if (gig.is_approved !== false) {
+            sendFCMPush({
+              data: {
+                title: '💼 New Opportunity Posted!',
+                body: gig.title || 'A new opportunity is now available.',
+                image_url: gig.image_url || '',
+                url: '/gigs.html'
+              }
+            }, 'all');
+          }
+        } else if (change.type === 'modified') {
+          const oldGig = previousGigs.find(g => g.id === change.doc.id);
+          if (oldGig && !oldGig.is_approved && gig.is_approved) {
+            sendFCMPush({
+              data: {
+                title: '💼 New Opportunity Approved!',
+                body: gig.title || 'A new opportunity is now available.',
+                image_url: gig.image_url || '',
+                url: '/gigs.html'
+              }
+            }, 'all');
+          }
+        }
+      });
     }, err => {
       console.error('[Firestore Sync] Gigs snapshot failed:', err.message);
+    });
+
+  // 17. Live User Chats Listener
+  let isInitialChats = true;
+  unsubscribers.userChats = db.collection('user_chats')
+    .orderBy('created_at', 'desc')
+    .limit(20)
+    .onSnapshot(snapshot => {
+      if (isInitialChats) {
+        isInitialChats = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const chat = change.doc.data();
+          if (chat.sender === 'admin') {
+            sendFCMPush({
+              data: {
+                title: `💬 Message from ${chat.sender_name || 'Kwabz Support'}`,
+                body: chat.message || 'Sent an image.',
+                image_url: chat.image_url || '',
+                url: '/account.html?tab=chat'
+              }
+            }, chat.user_id);
+          } else if (chat.sender === 'user') {
+            sendFCMPush({
+              data: {
+                title: `💬 New Message from ${chat.sender_name || 'Customer'}`,
+                body: chat.message || 'Sent an image.',
+                image_url: chat.image_url || '',
+                url: `/admin-chat.html?uid=${chat.user_id}`
+              }
+            }, 'admin');
+          }
+        }
+      });
+    }, err => {
+      console.error('[Firestore Sync] User chats snapshot failed:', err.message);
+    });
+
+  // 18. Live Communications Listener (Admin-Seller Chat)
+  let isInitialCommunications = true;
+  unsubscribers.communications = db.collection('communications')
+    .orderBy('timestamp', 'desc')
+    .limit(20)
+    .onSnapshot(snapshot => {
+      if (isInitialCommunications) {
+        isInitialCommunications = false;
+        return;
+      }
+
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const msg = change.doc.data();
+          if (msg.type === 'broadcast') return;
+          
+          if (msg.sender_id === 'admin') {
+            sendFCMPush({
+              data: {
+                title: '💬 Message from Kwabz Admin',
+                body: msg.message || 'Sent an image.',
+                image_url: msg.image_url || '',
+                url: '/seller-dashboard.html?tab=support'
+              }
+            }, msg.receiver_id);
+          } else {
+            sendFCMPush({
+              data: {
+                title: `💬 Seller Message: ${msg.sender_name || 'Seller'}`,
+                body: msg.message || 'Sent an image.',
+                image_url: msg.image_url || '',
+                url: `/admin-sellers.html?chat=${msg.conversation_id}`
+              }
+            }, 'admin');
+          }
+        }
+      });
+    }, err => {
+      console.error('[Firestore Sync] Communications snapshot failed:', err.message);
     });
 }
 
@@ -719,6 +929,73 @@ app.post('/api/visitors/heartbeat', (req, res) => {
   res.json({ success: true, activeCount: activeVisitors.size });
 });
 
+// 7.7. FCM Token Registration Proxy
+app.post('/api/fcm/register', async (req, res) => {
+  if (!isFirebaseOnline || !db) {
+    return res.status(503).json({ error: 'Database service is unavailable' });
+  }
+  const { token, uid, userAgent } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: 'Token is required' });
+  }
+  try {
+    // 1. Save to fcm_tokens collection
+    await db.collection('fcm_tokens').doc(token).set({
+      token: token,
+      uid: uid || 'guest',
+      userAgent: userAgent || '',
+      last_updated: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    // 2. If uid is provided, arrayUnion into user's fcmTokens list
+    if (uid && uid !== 'guest') {
+      await db.collection('users').doc(uid).set({
+        fcmTokens: FieldValue.arrayUnion(token)
+      }, { merge: true });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[FCM Proxy] Error registering token:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7.8. FCM Token Unregistration Proxy
+app.post('/api/fcm/unregister', async (req, res) => {
+  if (!isFirebaseOnline || !db) {
+    return res.status(503).json({ error: 'Database service is unavailable' });
+  }
+  const { token, uid, logout } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: 'Token is required' });
+  }
+  try {
+    if (logout) {
+      // For logouts: Keep the token but update its uid to 'guest' so they still get broadcasts
+      await db.collection('fcm_tokens').doc(token).set({
+        uid: 'guest',
+        last_updated: FieldValue.serverTimestamp()
+      }, { merge: true }).catch(() => {});
+    } else {
+      // For explicit disable: Delete from fcm_tokens collection completely
+      await db.collection('fcm_tokens').doc(token).delete().catch(() => {});
+    }
+
+    // Remove from user's nested fcmTokens array
+    if (uid && uid !== 'guest') {
+      await db.collection('users').doc(uid).set({
+        fcmTokens: FieldValue.arrayRemove(token)
+      }, { merge: true }).catch(() => {});
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[FCM Proxy] Error unregistering token:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 7. Get Active Visitor Count
 app.get('/api/visitor-count', (req, res) => {
   res.json({ count: activeVisitors.size });
@@ -886,6 +1163,69 @@ app.get('/api/reviews/user/:uid', async (req, res) => {
   } catch (err) {
     console.error('Failed to fetch user reviews:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Cloudinary Upload Proxy ──────────────────────────────────
+// Proxies image uploads to Cloudinary using server-side signed credentials.
+// Accepts JSON: { file: base64DataUrl|remoteUrl, cloudName?, uploadPreset? }
+// Returns:      { secure_url: string, public_id: string }
+app.post('/api/upload', async (req, res) => {
+  const { file, cloudName: clientCloudName, uploadPreset: clientPreset } = req.body || {};
+
+  if (!file) {
+    return res.status(400).json({ error: 'No file data provided' });
+  }
+
+  const cloudName    = process.env.CLOUDINARY_CLOUD_NAME    || clientCloudName || 'dcix8pa5a';
+  const apiKey       = process.env.CLOUDINARY_API_KEY       || '379252623331886';
+  const apiSecret    = process.env.CLOUDINARY_API_SECRET    || '';
+  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || clientPreset    || 'j5l8qibi';
+
+  const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+
+  try {
+    // Use native FormData (Node 18+ built-in — no extra packages needed)
+    const form = new FormData();
+    form.append('file', file);
+
+    if (apiSecret) {
+      // ── Signed Upload (preferred — no upload preset needed) ──
+      const timestamp = Math.round(Date.now() / 1000);
+
+      // Cloudinary signature: SHA-1 of "param1=value1&param2=value2..." + apiSecret
+      // Parameters must be sorted alphabetically, secret appended at the end (no separator)
+      const { createHash } = await import('crypto');
+      const strToSign = `timestamp=${timestamp}${apiSecret}`;
+      const signature  = createHash('sha1').update(strToSign).digest('hex');
+
+      form.append('api_key',   apiKey);
+      form.append('timestamp', String(timestamp));
+      form.append('signature', signature);
+
+      console.log(`[Cloudinary Proxy] Signed upload → cloud: ${cloudName}`);
+    } else {
+      // ── Unsigned Upload (preset must exist and be set to Unsigned) ──
+      form.append('upload_preset', uploadPreset);
+      console.log(`[Cloudinary Proxy] Unsigned upload → preset: ${uploadPreset}`);
+    }
+
+    // Node 18+ has global fetch — no node-fetch required
+    const response = await fetch(uploadUrl, { method: 'POST', body: form });
+    const data     = await response.json();
+
+    if (!response.ok || !data.secure_url) {
+      const errMsg = data?.error?.message || JSON.stringify(data);
+      console.error('[Cloudinary Proxy] Cloudinary rejected upload:', errMsg);
+      return res.status(response.status || 500).json({ error: errMsg });
+    }
+
+    console.log(`[Cloudinary Proxy] ✅ Upload OK: ${data.secure_url}`);
+    return res.json({ secure_url: data.secure_url, public_id: data.public_id });
+
+  } catch (err) {
+    console.error('[Cloudinary Proxy] Unexpected error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
