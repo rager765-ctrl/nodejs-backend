@@ -336,24 +336,23 @@ function setupBackgroundSync() {
         
         if (change.type === 'added') {
           sendFCMPush({
-            notification: {
-              title: '🔔 New Order Received!',
-              body: `Order #${order.order_id || change.doc.id} for GH₵ ${Number(order.total_amount).toFixed(2)}`,
-            },
-            data: { url: '/admin-orders.html' }
+            data: {
+              title: '\uD83D\uDD14 New Order Received!',
+              body: `Order #${order.order_id || change.doc.id} for GH\u20B5 ${Number(order.total_amount).toFixed(2)}`,
+              url: '/admin-orders.html'
+            }
           }, 'admin');
         } 
         else if (change.type === 'modified') {
           const oldOrder = previousOrders.find(o => o.id === change.doc.id);
           if (oldOrder && oldOrder.status !== order.status && order.status) {
-             // Order status changed! Notify the specific user!
              if (order.customer_uid) {
                sendFCMPush({
-                 notification: {
-                   title: `📦 Order Update: ${order.status.toUpperCase()}`,
+                 data: {
+                   title: `\uD83D\uDCE6 Order Update: ${order.status.toUpperCase()}`,
                    body: `Your order #${order.order_id || change.doc.id} status is now ${order.status}.`,
-                 },
-                 data: { url: '/account.html?tab=orders' }
+                   url: '/account.html?tab=orders'
+                 }
                }, order.customer_uid);
              }
           }
@@ -406,12 +405,12 @@ function setupBackgroundSync() {
         if (change.type === 'added') {
           const broadcast = change.doc.data();
           sendFCMPush({
-            notification: {
-              title: '📢 Announcement from Kwabz Store!',
+            data: {
+              title: '\uD83D\uDCE2 Announcement from Kwabz Store!',
               body: broadcast.message || 'Check out our latest update.',
-              image: broadcast.image_url || ''
-            },
-            data: { url: '/account.html?tab=announcements' }
+              image_url: broadcast.image_url || '',
+              url: '/account.html?tab=announcements'
+            }
           }, 'all');
         }
       });
@@ -432,14 +431,12 @@ function setupBackgroundSync() {
       snapshot.docChanges().forEach(change => {
         if (change.type === 'added') {
           const data = change.doc.data();
-          const discStr = data.discount > 0 ? ` — ${data.discount}% OFF!` : '';
+          const discStr = data.discount > 0 ? ` \u2014 ${data.discount}% OFF!` : '';
           sendFCMPush({
-            notification: {
-              title: '🛍️ New Arrival at Kwabz Store!',
-              body: `${data.name}${discStr} | GH₵ ${Number(data.price).toFixed(2)}`,
-              image: data.image_url || ''
-            },
             data: {
+              title: '\uD83D\uDED2 New Arrival at Kwabz Store!',
+              body: `${data.name}${discStr} | GH\u20B5 ${Number(data.price).toFixed(2)}`,
+              image_url: data.image_url || '',
               product_id: data.product_id || '',
               url: data.product_id ? `/product-detail.html?id=${data.product_id}` : '/shop.html'
             }
