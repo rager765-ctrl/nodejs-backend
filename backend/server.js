@@ -966,6 +966,73 @@ app.get('/api/visitors/detailed', (req, res) => {
   res.json({ count: visitors.length, visitors });
 });
 
+// 7.7. FCM Token Registration Proxy
+app.post('/api/fcm/register', async (req, res) => {
+  if (!isFirebaseOnline || !db) {
+    return res.status(503).json({ error: 'Database service is unavailable' });
+  }
+  const { token, uid, userAgent } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: 'Token is required' });
+  }
+  try {
+    // 1. Save to fcm_tokens collection
+    await db.collection('fcm_tokens').doc(token).set({
+      token,
+      uid: uid || 'guest',
+      userAgent: userAgent || '',
+      last_updated: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    // 2. If user is logged in (has uid and not 'guest'), nest inside user doc
+    if (uid && uid !== 'guest') {
+      await db.collection('users').doc(uid).set({
+        fcmTokens: FieldValue.arrayUnion(token)
+      }, { merge: true });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[FCM Proxy] Error registering token:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7.8. FCM Token Unregistration Proxy
+app.post('/api/fcm/unregister', async (req, res) => {
+  if (!isFirebaseOnline || !db) {
+    return res.status(503).json({ error: 'Database service is unavailable' });
+  }
+  const { token, uid, logout } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: 'Token is required' });
+  }
+  try {
+    if (logout) {
+      // For logouts: Keep the token but update its uid to 'guest' so they still get broadcasts
+      await db.collection('fcm_tokens').doc(token).set({
+        uid: 'guest',
+        last_updated: FieldValue.serverTimestamp()
+      }, { merge: true }).catch(() => {});
+    } else {
+      // For explicit disable: Delete from fcm_tokens collection completely
+      await db.collection('fcm_tokens').doc(token).delete().catch(() => {});
+    }
+
+    // Remove from user's nested fcmTokens array
+    if (uid && uid !== 'guest') {
+      await db.collection('users').doc(uid).set({
+        fcmTokens: FieldValue.arrayRemove(token)
+      }, { merge: true }).catch(() => {});
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[FCM Proxy] Error unregistering token:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 8. Order Placement Proxy
 app.post('/api/orders', async (req, res) => {
   if (!isFirebaseOnline || !db) {
