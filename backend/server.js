@@ -1164,6 +1164,86 @@ app.get('/api/reviews/user/:uid', async (req, res) => {
   }
 });
 
+// ─── Cloudinary Upload Proxy ──────────────────────────────────
+// Proxies image uploads to Cloudinary using server-side credentials.
+// Accepts: { file: base64DataUrl|url, cloudName?, uploadPreset? }
+// Returns: { secure_url: string }
+app.post('/api/upload', async (req, res) => {
+  const { file, cloudName: clientCloudName, uploadPreset: clientPreset } = req.body || {};
+
+  if (!file) {
+    return res.status(400).json({ error: 'No file data provided' });
+  }
+
+  const cloudName    = process.env.CLOUDINARY_CLOUD_NAME || clientCloudName || 'dcix8pa5a';
+  const apiKey       = process.env.CLOUDINARY_API_KEY    || '379252623331886';
+  const apiSecret    = process.env.CLOUDINARY_API_SECRET || '';
+  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || clientPreset || 'j5l8qibi';
+
+  const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+
+  try {
+    let body;
+    let headers = {};
+
+    if (apiSecret) {
+      // ── Signed Upload (preferred — no preset needed) ──────────
+      const timestamp = Math.round(Date.now() / 1000);
+
+      // Build the string to sign
+      const strToSign = `timestamp=${timestamp}${apiSecret}`;
+
+      // SHA-1 via Node.js crypto
+      const { createHash } = await import('crypto');
+      const signature = createHash('sha1').update(strToSign).digest('hex');
+
+      const params = new URLSearchParams();
+      params.append('file',      file);
+      params.append('timestamp', String(timestamp));
+      params.append('api_key',   apiKey);
+      params.append('signature', signature);
+
+      body    = params;
+      headers = {}; // URLSearchParams sets its own content-type
+
+      console.log(`[Cloudinary Proxy] Attempting signed upload to cloud: ${cloudName}`);
+    } else {
+      // ── Unsigned Upload (preset required) ────────────────────
+      const params = new URLSearchParams();
+      params.append('file',          file);
+      params.append('upload_preset', uploadPreset);
+
+      body = params;
+
+      console.log(`[Cloudinary Proxy] Attempting unsigned upload with preset: ${uploadPreset}`);
+    }
+
+    const fetchModule = await import('node-fetch').catch(() => null);
+    const fetchFn     = fetchModule ? fetchModule.default : fetch;
+
+    const response = await fetchFn(uploadUrl, {
+      method:  'POST',
+      body,
+      headers,
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.secure_url) {
+      const errMsg = data?.error?.message || JSON.stringify(data);
+      console.error('[Cloudinary Proxy] Upload rejected by Cloudinary:', errMsg);
+      return res.status(response.status || 500).json({ error: errMsg });
+    }
+
+    console.log(`[Cloudinary Proxy] Upload successful: ${data.secure_url}`);
+    return res.json({ secure_url: data.secure_url, public_id: data.public_id });
+
+  } catch (err) {
+    console.error('[Cloudinary Proxy] Unexpected error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Food Categories Endpoints ───────────────────────────────
 app.get('/api/food-categories', (req, res) => {
   res.json(cache.foodCategories.length > 0 ? cache.foodCategories : []);
