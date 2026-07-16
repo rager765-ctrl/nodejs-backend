@@ -132,6 +132,7 @@ const cacheKeys = {
   feedbackConfig: 'kwabz:feedbackConfig',
   feedbackSubmissions: 'kwabz:feedbackSubmissions',
   gigs: 'kwabz:gigs',
+  fcmTokens: 'kwabz:fcmTokens',   // ✅ All push subscriber tokens
   reviews: (productId) => `kwabz:reviews:${productId}`
 };
 
@@ -151,6 +152,7 @@ async function setCacheValue(key, value, ttlSeconds = null) {
   else if (key === cacheKeys.feedbackConfig) cache.feedbackConfig = value;
   else if (key === cacheKeys.feedbackSubmissions) cache.feedbackSubmissions = value;
   else if (key === cacheKeys.gigs) cache.gigs = value;
+  else if (key === cacheKeys.fcmTokens) cache.fcmTokens = value; // ✅ FCM tokens in memory
   else if (key.startsWith('kwabz:reviews:')) {
     const prodId = key.replace('kwabz:reviews:', '');
     cache.reviews[prodId] = { data: value, ts: Date.now() };
@@ -234,15 +236,24 @@ async function sendFCMPush(payload, targetRole = 'all') {
       // ✅ Served from in-memory cache — no Firestore read unless stale
       tokens = await getAdminTokens();
     } else if (targetRole === 'all') {
-      // ✅ Served from the fcm_tokens cache populated by the live listener below
-      // (no full collection scan on every push!)
+      // ✅ Served from the fcm_tokens cache (memory first, then Redis, then cold Firestore fetch)
       tokens = [...cache.fcmTokens];
       if (tokens.length === 0) {
-        // One-time cold-start fetch if cache is empty
-        console.log('[FCM] Cold-start: fetching fcm_tokens once to populate cache...');
-        const tokensSnap = await db.collection('fcm_tokens').get();
-        tokensSnap.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
-        cache.fcmTokens = [...new Set(tokens)].filter(Boolean);
+        // Try Redis before hitting Firestore
+        const redisTokens = await getCacheValue(cacheKeys.fcmTokens, null);
+        if (redisTokens && redisTokens.length > 0) {
+          console.log(`[FCM] Warm from Redis cache. Count: ${redisTokens.length}`);
+          cache.fcmTokens = redisTokens;
+          tokens = [...cache.fcmTokens];
+        } else {
+          // True cold-start: Firestore one-time fetch
+          console.log('[FCM] Cold-start: fetching fcm_tokens once to populate cache...');
+          const tokensSnap = await db.collection('fcm_tokens').get();
+          tokensSnap.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
+          const deduped = [...new Set(tokens)].filter(Boolean);
+          await setCacheValue(cacheKeys.fcmTokens, deduped); // persist to Redis too
+          tokens = deduped;
+        }
       }
     } else {
       // Treat targetRole as a specific UID string
@@ -575,14 +586,16 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] Settings snapshot failed:', err.message);
     });
 
-  // FCM Tokens Live Listener — keeps cache.fcmTokens in sync so sendFCMPush
-  // never needs to scan the full fcm_tokens collection on every push.
+  // FCM Tokens Live Listener — keeps cache.fcmTokens in sync (memory + Redis)
+  // so sendFCMPush('all') never scans the full Firestore collection on every push.
   unsubscribers.fcmTokens = db.collection('fcm_tokens')
-    .onSnapshot(snapshot => {
+    .onSnapshot(async snapshot => {
       const tokens = [];
       snapshot.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
-      cache.fcmTokens = [...new Set(tokens)].filter(Boolean);
-      console.log(`[Firestore Sync] fcm_tokens cache refreshed. Count: ${cache.fcmTokens.length}`);
+      const deduped = [...new Set(tokens)].filter(Boolean);
+      // setCacheValue writes to both in-memory cache AND Redis
+      await setCacheValue(cacheKeys.fcmTokens, deduped);
+      console.log(`[Firestore Sync] fcm_tokens cache refreshed (memory + Redis). Count: ${deduped.length}`);
     }, err => {
       console.error('[Firestore Sync] fcm_tokens snapshot failed:', err.message);
     });
