@@ -1053,8 +1053,29 @@ app.get('/api/sellers', (req, res) => {
 });
 
 // 5. Fetch Settings
-app.get('/api/settings', (req, res) => {
-  res.json(Object.keys(cache.settings).length > 0 ? cache.settings : mockData.settings);
+app.get('/api/settings', async (req, res) => {
+  if (Object.keys(cache.settings).length > 0) {
+    return res.json(cache.settings);
+  }
+  const redisSettings = await getCacheValue(cacheKeys.settings, null);
+  if (redisSettings) {
+    cache.settings = redisSettings;
+    return res.json(redisSettings);
+  }
+  // Fallback to one-time Firestore read if cache is completely empty
+  if (isFirebaseOnline && db) {
+    try {
+      const snap = await db.collection('settings').doc('global').get();
+      if (snap.exists) {
+        const data = snap.data();
+        await setCacheValue(cacheKeys.settings, data);
+        return res.json(data);
+      }
+    } catch (err) {
+      console.warn('[API Settings] Cold start fetch failed:', err.message);
+    }
+  }
+  res.json(mockData.settings || {});
 });
 
 app.post('/api/settings', async (req, res) => {
@@ -1283,8 +1304,27 @@ app.get('/api/promo-codes', (req, res) => {
   res.json(safeList);
 });
 
-app.get('/api/broadcasts', (req, res) => {
-  res.json(cache.broadcasts.length > 0 ? cache.broadcasts : []);
+app.get('/api/broadcasts', async (req, res) => {
+  if (cache.broadcasts.length > 0) {
+    return res.json(cache.broadcasts);
+  }
+  const redisBroadcasts = await getCacheValue(cacheKeys.broadcasts, null);
+  if (redisBroadcasts && redisBroadcasts.length > 0) {
+    cache.broadcasts = redisBroadcasts;
+    return res.json(redisBroadcasts);
+  }
+  // Fallback to one-time Firestore read
+  if (isFirebaseOnline && db) {
+    try {
+      const snap = await db.collection('broadcasts').get();
+      const broadcasts = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      await setCacheValue(cacheKeys.broadcasts, broadcasts);
+      return res.json(broadcasts);
+    } catch (err) {
+      console.warn('[API Broadcasts] Cold start fetch failed:', err.message);
+    }
+  }
+  res.json([]);
 });
 
 app.get('/api/reviews/:productId', async (req, res) => {
