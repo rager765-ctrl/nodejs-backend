@@ -108,6 +108,7 @@ try {
   redisClient.get('ping').then(() => {
     console.log('✅ Connected to Upstash Redis cache backend successfully.');
     isRedisOnline = true;
+    restoreActiveVisitorsFromRedis();
   }).catch(e => {
     console.warn('⚠️ Upstash connection ping failed. Using local in-memory store.', e.message);
   });
@@ -132,7 +133,7 @@ const cacheKeys = {
   feedbackConfig: 'kwabz:feedbackConfig',
   feedbackSubmissions: 'kwabz:feedbackSubmissions',
   gigs: 'kwabz:gigs',
-  fcmTokens: 'kwabz:fcmTokens',   // ✅ All push subscriber tokens
+  fcmTokens: 'kwabz:fcmTokens',   // All push subscriber tokens
   reviews: (productId) => `kwabz:reviews:${productId}`
 };
 
@@ -152,7 +153,7 @@ async function setCacheValue(key, value, ttlSeconds = null) {
   else if (key === cacheKeys.feedbackConfig) cache.feedbackConfig = value;
   else if (key === cacheKeys.feedbackSubmissions) cache.feedbackSubmissions = value;
   else if (key === cacheKeys.gigs) cache.gigs = value;
-  else if (key === cacheKeys.fcmTokens) cache.fcmTokens = value; // ✅ FCM tokens in memory
+  else if (key === cacheKeys.fcmTokens) cache.fcmTokens = value; // FCM tokens in memory
   else if (key.startsWith('kwabz:reviews:')) {
     const prodId = key.replace('kwabz:reviews:', '');
     cache.reviews[prodId] = { data: value, ts: Date.now() };
@@ -191,6 +192,36 @@ async function getCacheValue(key, fallbackLocalValue) {
 // Key: visitorId, Value: { uid, page, lastActive, displayName }
 const activeVisitors = new Map();
 
+// Warm up active visitors from Redis if available
+async function restoreActiveVisitorsFromRedis() {
+  if (!isRedisOnline || !redisClient) return;
+  try {
+    const keys = await redisClient.keys('kwabz:active_visitor:*');
+    if (keys && keys.length > 0) {
+      const values = await redisClient.mget(...keys);
+      let count = 0;
+      keys.forEach((key, idx) => {
+        const val = values[idx];
+        if (val) {
+          const visitorId = key.replace('kwabz:active_visitor:', '');
+          const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+          activeVisitors.set(visitorId, {
+            uid: parsed.uid,
+            page: parsed.page,
+            displayName: parsed.displayName,
+            lastActive: parsed.lastActive
+          });
+          count++;
+        }
+      });
+      console.log(`[Redis] Restored ${count} active visitors on startup.`);
+      io.emit('visitor_count_updated', activeVisitors.size);
+    }
+  } catch (err) {
+    console.warn('[Redis] Failed to restore active visitors on startup:', err.message);
+  }
+}
+
 // Helper to get safe numeric timestamp
 function getSafeTime(val) {
   if (!val) return 0;
@@ -214,17 +245,51 @@ async function getAdminTokens() {
   if (_cachedAdminTokens.length > 0 && (now - _adminTokensCachedAt) < ADMIN_TOKEN_TTL_MS) {
     return _cachedAdminTokens;
   }
+
+  if (isRedisOnline && redisClient) {
+    try {
+      const redisTokens = await redisClient.get('kwabz:adminFcmTokens');
+      if (redisTokens) {
+        const parsed = typeof redisTokens === 'string' ? JSON.parse(redisTokens) : redisTokens;
+        if (Array.isArray(parsed)) {
+          _cachedAdminTokens = parsed;
+          _adminTokensCachedAt = now;
+          console.log(`[FCM Cache] Warm admin tokens loaded from Redis. Count: ${_cachedAdminTokens.length}`);
+          return _cachedAdminTokens;
+        }
+      }
+    } catch (err) {
+      console.warn('[FCM Cache] Failed to read admin tokens from Redis:', err.message);
+    }
+  }
+
   if (!isFirebaseOnline || !db) return [];
-  const adminsSnap = await db.collection('users').where('role', '==', 'admin').get();
-  const tokens = [];
-  adminsSnap.forEach(doc => {
-    const data = doc.data();
-    if (data.fcmTokens && Array.isArray(data.fcmTokens)) tokens.push(...data.fcmTokens);
-  });
-  _cachedAdminTokens = [...new Set(tokens)].filter(Boolean);
-  _adminTokensCachedAt = now;
-  console.log(`[FCM Cache] Admin tokens refreshed. Count: ${_cachedAdminTokens.length}`);
-  return _cachedAdminTokens;
+  try {
+    const adminsSnap = await db.collection('users').where('role', '==', 'admin').get();
+    const tokens = [];
+    adminsSnap.forEach(doc => {
+      const data = doc.data();
+      if (data.fcmTokens && Array.isArray(data.fcmTokens)) tokens.push(...data.fcmTokens);
+    });
+    const deduped = [...new Set(tokens)].filter(Boolean);
+    
+    _cachedAdminTokens = deduped;
+    _adminTokensCachedAt = now;
+
+    if (isRedisOnline && redisClient) {
+      try {
+        await redisClient.set('kwabz:adminFcmTokens', JSON.stringify(deduped), { ex: 300 }); // 5 minutes TTL
+      } catch (err) {
+        console.warn('[FCM Cache] Failed to save admin tokens to Redis:', err.message);
+      }
+    }
+
+    console.log(`[FCM Cache] Admin tokens refreshed from Firestore. Count: ${_cachedAdminTokens.length}`);
+    return _cachedAdminTokens;
+  } catch (err) {
+    console.error('[FCM Cache] Failed to fetch admin tokens from Firestore:', err);
+    return _cachedAdminTokens;
+  }
 }
 
 async function sendFCMPush(payload, targetRole = 'all') {
@@ -233,10 +298,10 @@ async function sendFCMPush(payload, targetRole = 'all') {
     let tokens = [];
 
     if (targetRole === 'admin') {
-      // ✅ Served from in-memory cache — no Firestore read unless stale
+      // Served from cache (memory/Redis)
       tokens = await getAdminTokens();
     } else if (targetRole === 'all') {
-      // ✅ Served from the fcm_tokens cache (memory first, then Redis, then cold Firestore fetch)
+      // Served from the fcm_tokens cache (memory first, then Redis, then cold Firestore fetch)
       tokens = [...cache.fcmTokens];
       if (tokens.length === 0) {
         // Try Redis before hitting Firestore
@@ -298,16 +363,32 @@ async function sendFCMPush(payload, targetRole = 'all') {
             const badToken = batch[idx];
             const errorCode = resp.error?.code;
             console.warn(`[FCM] Error sending to token ${badToken.substring(0, 15)}... :`, resp.error);
-            if (errorCode === 'messaging/registration-token-not-registered' || errorCode === 'messaging/invalid-argument') {
-              console.log(`[FCM] Cleaning up invalid token: ${badToken}`);
-              // Remove from in-memory cache immediately
+            const PURGEABLE_ERRORS = [
+              'messaging/registration-token-not-registered',
+              'messaging/invalid-argument',
+              'messaging/third-party-auth-error',  // token registered under a different Firebase project
+              'messaging/invalid-registration-token'
+            ];
+            if (PURGEABLE_ERRORS.includes(errorCode)) {
+              console.log(`[FCM] Cleaning up stale/mismatched token (${errorCode}): ${badToken.substring(0, 20)}...`);
+              
+              // Remove from in-memory caches immediately
               cache.fcmTokens = cache.fcmTokens.filter(t => t !== badToken);
               _cachedAdminTokens = _cachedAdminTokens.filter(t => t !== badToken);
-              // Remove from Firestore (fire and forget)
-              db.collection('fcm_tokens').doc(badToken).delete().catch(() => {});
-              db.collection('users').where('fcmTokens', 'array-contains', badToken).get()
-                .then(snap => snap.forEach(uDoc => uDoc.ref.update({ fcmTokens: FieldValue.arrayRemove(badToken) }).catch(() => {})))
-                .catch(() => {});
+              
+              if (isRedisOnline && redisClient) {
+                redisClient.set('kwabz:fcmTokens', JSON.stringify(cache.fcmTokens)).catch(() => {});
+                redisClient.set('kwabz:adminFcmTokens', JSON.stringify(_cachedAdminTokens), { ex: 300 }).catch(() => {});
+              }
+
+              await db.collection('fcm_tokens').doc(badToken).delete().catch(() => {});
+              
+              const usersWithToken = await db.collection('users').where('fcmTokens', 'array-contains', badToken).get();
+              usersWithToken.forEach(async (uDoc) => {
+                await uDoc.ref.update({
+                  fcmTokens: FieldValue.arrayRemove(badToken)
+                }).catch(() => {});
+              });
             }
           }
         }
@@ -330,6 +411,8 @@ let unsubscribers = {
   gigs: null,
   userChats: null,
   communications: null,
+  orders: null,
+  productNotifications: null,
   fcmTokens: null
 };
 
@@ -575,12 +658,31 @@ function setupBackgroundSync() {
     });
 
   // 4. Live Settings Document Listener
+  let isInitialSettings = true;
   unsubscribers.settings = db.collection('settings').doc('global')
     .onSnapshot(async doc => {
       if (doc.exists) {
         console.log('[Firestore Sync] Global Settings document updated.');
-        await setCacheValue(cacheKeys.settings, doc.data());
+        const oldSettings = { ...cache.settings };
+        const newSettings = doc.data();
+        await setCacheValue(cacheKeys.settings, newSettings);
         io.emit('settings_changed', cache.settings);
+
+        if (isInitialSettings) {
+          isInitialSettings = false;
+          return;
+        }
+
+        // Detect if Force PWA Update Banner was toggled ON
+        if (newSettings.forcePwaUpdate && !oldSettings.forcePwaUpdate) {
+          sendFCMPush({
+            data: {
+              title: '⚡ New App Update Available!',
+              body: 'A fresh update has been deployed. Tap to reload and sync the latest features.',
+              url: '/'
+            }
+          }, 'all');
+        }
       }
     }, err => {
       console.error('[Firestore Sync] Settings snapshot failed:', err.message);
@@ -593,7 +695,6 @@ function setupBackgroundSync() {
       const tokens = [];
       snapshot.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
       const deduped = [...new Set(tokens)].filter(Boolean);
-      // setCacheValue writes to both in-memory cache AND Redis
       await setCacheValue(cacheKeys.fcmTokens, deduped);
       console.log(`[Firestore Sync] fcm_tokens cache refreshed (memory + Redis). Count: ${deduped.length}`);
     }, err => {
@@ -787,7 +888,7 @@ function setupBackgroundSync() {
 
 // ─── Memory Visitor Heartbeat Sweep Task ─────────────────────
 // Sweeps the visitor registry every 30 seconds and removes any inactive past 15 minutes.
-setInterval(() => {
+setInterval(async () => {
   const now = Date.now();
   const threshold = 15 * 60 * 1000; // 15 mins
   let changed = false;
@@ -797,6 +898,23 @@ setInterval(() => {
       activeVisitors.delete(key);
       changed = true;
       console.log(`🧹 Visitor timed out: ${key}`);
+    }
+  }
+
+  // Sync with Redis expired keys to handle multiple instances
+  if (isRedisOnline && redisClient) {
+    try {
+      const keys = await redisClient.keys('kwabz:active_visitor:*');
+      const currentActiveIds = new Set(keys.map(k => k.replace('kwabz:active_visitor:', '')));
+      for (const localId of activeVisitors.keys()) {
+        if (!currentActiveIds.has(localId)) {
+          activeVisitors.delete(localId);
+          changed = true;
+          console.log(`🧹 Visitor timed out (via Redis): ${localId}`);
+        }
+      }
+    } catch (err) {
+      console.warn('[Redis] Sweep sync failed:', err.message);
     }
   }
 
@@ -950,19 +1068,30 @@ app.post('/api/settings', async (req, res) => {
 });
 
 // 6. Visitor Heartbeat Endpoint (COMPLETELY replaces Firestore visitor database writes!)
-app.post('/api/visitors/heartbeat', (req, res) => {
+app.post('/api/visitors/heartbeat', async (req, res) => {
   const { visitorId, uid, page, displayName } = req.body;
   if (!visitorId) {
     return res.status(400).json({ error: 'visitorId is required' });
   }
 
   const prevSize = activeVisitors.size;
-  activeVisitors.set(visitorId, {
+  const visitorData = {
     uid: uid || null,
     page: page || 'index.html',
     displayName: displayName || null,
     lastActive: Date.now()
-  });
+  };
+
+  activeVisitors.set(visitorId, visitorData);
+
+  if (isRedisOnline && redisClient) {
+    try {
+      const key = `kwabz:active_visitor:${visitorId}`;
+      await redisClient.set(key, JSON.stringify(visitorData), { ex: 900 }); // 15 mins TTL
+    } catch (err) {
+      console.warn('[Redis] Failed to save active visitor heartbeat:', err.message);
+    }
+  }
 
   // If visitor count changed, notify sockets
   if (activeVisitors.size !== prevSize) {
@@ -970,6 +1099,56 @@ app.post('/api/visitors/heartbeat', (req, res) => {
   }
 
   res.json({ success: true, activeCount: activeVisitors.size });
+});
+
+// 7. Get Active Visitor Count
+app.get('/api/visitor-count', async (req, res) => {
+  if (isRedisOnline && redisClient) {
+    try {
+      const keys = await redisClient.keys('kwabz:active_visitor:*');
+      return res.json({ count: keys.length });
+    } catch (_) {}
+  }
+  res.json({ count: activeVisitors.size });
+});
+
+// 7.5. Get Detailed Active Visitors
+app.get('/api/visitors/detailed', async (req, res) => {
+  if (isRedisOnline && redisClient) {
+    try {
+      const keys = await redisClient.keys('kwabz:active_visitor:*');
+      const visitors = [];
+      if (keys.length > 0) {
+        const values = await redisClient.mget(...keys);
+        keys.forEach((key, idx) => {
+          const val = values[idx];
+          if (val) {
+            const visitorId = key.replace('kwabz:active_visitor:', '');
+            const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+            visitors.push({ visitorId, ...parsed });
+          }
+        });
+      }
+      // Sync local map
+      activeVisitors.clear();
+      visitors.forEach(v => {
+        activeVisitors.set(v.visitorId, {
+          uid: v.uid,
+          page: v.page,
+          displayName: v.displayName,
+          lastActive: v.lastActive
+        });
+      });
+      return res.json({ count: visitors.length, visitors });
+    } catch (err) {
+      console.warn('[Redis] Failed to fetch detailed active visitors, falling back to local memory', err.message);
+    }
+  }
+  const visitors = Array.from(activeVisitors.entries()).map(([vid, data]) => ({
+    visitorId: vid,
+    ...data
+  }));
+  res.json({ count: visitors.length, visitors });
 });
 
 // 7.7. FCM Token Registration Proxy
@@ -984,17 +1163,26 @@ app.post('/api/fcm/register', async (req, res) => {
   try {
     // 1. Save to fcm_tokens collection
     await db.collection('fcm_tokens').doc(token).set({
-      token: token,
+      token,
       uid: uid || 'guest',
       userAgent: userAgent || '',
       last_updated: FieldValue.serverTimestamp()
     }, { merge: true });
 
-    // 2. If uid is provided, arrayUnion into user's fcmTokens list
+    // 2. If user is logged in (has uid and not 'guest'), nest inside user doc
     if (uid && uid !== 'guest') {
       await db.collection('users').doc(uid).set({
         fcmTokens: FieldValue.arrayUnion(token)
       }, { merge: true });
+
+      // Invalidate admin push token cache in memory/Redis
+      _cachedAdminTokens = [];
+      _adminTokensCachedAt = 0;
+      if (isRedisOnline && redisClient) {
+        try {
+          await redisClient.del('kwabz:adminFcmTokens');
+        } catch (_) {}
+      }
     }
 
     res.json({ success: true });
@@ -1030,6 +1218,15 @@ app.post('/api/fcm/unregister', async (req, res) => {
       await db.collection('users').doc(uid).set({
         fcmTokens: FieldValue.arrayRemove(token)
       }, { merge: true }).catch(() => {});
+
+      // Invalidate admin push token cache in memory/Redis
+      _cachedAdminTokens = [];
+      _adminTokensCachedAt = 0;
+      if (isRedisOnline && redisClient) {
+        try {
+          await redisClient.del('kwabz:adminFcmTokens');
+        } catch (_) {}
+      }
     }
 
     res.json({ success: true });
@@ -1037,20 +1234,6 @@ app.post('/api/fcm/unregister', async (req, res) => {
     console.error('[FCM Proxy] Error unregistering token:', err);
     res.status(500).json({ error: err.message });
   }
-});
-
-// 7. Get Active Visitor Count
-app.get('/api/visitor-count', (req, res) => {
-  res.json({ count: activeVisitors.size });
-});
-
-// 7.5. Get Detailed Active Visitors
-app.get('/api/visitors/detailed', (req, res) => {
-  const visitors = Array.from(activeVisitors.entries()).map(([vid, data]) => ({
-    visitorId: vid,
-    ...data
-  }));
-  res.json({ count: visitors.length, visitors });
 });
 
 // 8. Order Placement Proxy
@@ -1207,89 +1390,6 @@ app.get('/api/reviews/user/:uid', async (req, res) => {
   } catch (err) {
     console.error('Failed to fetch user reviews:', err);
     res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Cloudinary Upload Proxy ──────────────────────────────────
-// Proxies image uploads to Cloudinary using server-side signed credentials.
-// Accepts JSON: { file: base64DataUrl|remoteUrl, cloudName?, uploadPreset? }
-// Returns:      { secure_url: string, public_id: string }
-app.post('/api/upload', async (req, res) => {
-  const { file, cloudName: clientCloudName, uploadPreset: clientPreset } = req.body || {};
-
-  if (!file) {
-    return res.status(400).json({ error: 'No file data provided' });
-  }
-
-  // ── Parse CLOUDINARY_URL if set (format: cloudinary://api_key:api_secret@cloud_name)
-  let cloudName    = clientCloudName || 'dcix8pa5a';
-  let apiKey       = '379252623331886';
-  let apiSecret    = '';
-  let uploadPreset = clientPreset    || 'j5l8qibi';
-
-  const cloudinaryUrl = process.env.CLOUDINARY_URL || '';
-  if (cloudinaryUrl.startsWith('cloudinary://')) {
-    try {
-      const parsed  = new URL(cloudinaryUrl);
-      apiKey        = parsed.username  || apiKey;
-      apiSecret     = parsed.password  || apiSecret;
-      cloudName     = parsed.hostname  || cloudName;
-      console.log(`[Cloudinary Proxy] Parsed CLOUDINARY_URL → cloud: ${cloudName}, key: ${apiKey.slice(0,6)}...`);
-    } catch (e) {
-      console.warn('[Cloudinary Proxy] Failed to parse CLOUDINARY_URL:', e.message);
-    }
-  } else {
-    // Fall back to individual env vars
-    cloudName    = process.env.CLOUDINARY_CLOUD_NAME    || cloudName;
-    apiKey       = process.env.CLOUDINARY_API_KEY       || apiKey;
-    apiSecret    = process.env.CLOUDINARY_API_SECRET    || apiSecret;
-    uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || uploadPreset;
-  }
-
-  const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
-
-  try {
-    // Use native FormData (Node 18+ built-in — no extra packages needed)
-    const form = new FormData();
-    form.append('file', file);
-
-    if (apiSecret) {
-      // ── Signed Upload (preferred — no upload preset needed) ──
-      const timestamp = Math.round(Date.now() / 1000);
-
-      // Cloudinary signature: SHA-1 of "param1=value1&param2=value2..." + apiSecret
-      // Parameters must be sorted alphabetically, secret appended at the end (no separator)
-      const { createHash } = await import('crypto');
-      const strToSign = `timestamp=${timestamp}${apiSecret}`;
-      const signature  = createHash('sha1').update(strToSign).digest('hex');
-
-      form.append('api_key',   apiKey);
-      form.append('timestamp', String(timestamp));
-      form.append('signature', signature);
-
-      console.log(`[Cloudinary Proxy] Signed upload → cloud: ${cloudName}`);
-    } else {
-      // ── Unsigned Upload (preset must exist and be set to Unsigned) ──
-      form.append('upload_preset', uploadPreset);
-      console.log(`[Cloudinary Proxy] Unsigned upload → preset: ${uploadPreset}`);
-    }
-
-    // Node 18+ has global fetch — no node-fetch required
-    const response = await fetch(uploadUrl, { method: 'POST', body: form });
-    const data     = await response.json();
-
-    if (!response.ok || !data.secure_url) {
-      const errMsg = data?.error?.message || JSON.stringify(data);
-      console.error('[Cloudinary Proxy] Cloudinary rejected upload:', errMsg);
-      return res.status(response.status || 500).json({ error: errMsg });
-    }
-
-    console.log(`[Cloudinary Proxy] ✅ Upload OK: ${data.secure_url}`);
-    return res.json({ secure_url: data.secure_url, public_id: data.public_id });
-
-  } catch (err) {
-    console.error('[Cloudinary Proxy] Unexpected error:', err.message);
-    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -1548,6 +1648,127 @@ app.delete('/api/gigs/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Cloudinary Signing Endpoint ─────────────────────────────
+// Returns a timestamp + SHA-1 signature so the browser can do a
+// SIGNED direct upload to Cloudinary without the image passing
+// through this server (avoids body-size limits entirely).
+// GET /api/cloudinary-sign → { timestamp, signature, apiKey, cloudName }
+app.get('/api/cloudinary-sign', async (req, res) => {
+  // ── Parse credentials from CLOUDINARY_URL or individual env vars ──
+  let cloudName = 'dcix8pa5a';
+  let apiKey    = '379252623331886';
+  let apiSecret = '';
+
+  const cloudinaryUrl = process.env.CLOUDINARY_URL || '';
+  if (cloudinaryUrl.startsWith('cloudinary://')) {
+    try {
+      const parsed = new URL(cloudinaryUrl);
+      apiKey    = parsed.username || apiKey;
+      apiSecret = parsed.password || apiSecret;
+      cloudName = parsed.hostname || cloudName;
+    } catch (e) {
+      console.warn('[Cloudinary Sign] Failed to parse CLOUDINARY_URL:', e.message);
+    }
+  } else {
+    cloudName = process.env.CLOUDINARY_CLOUD_NAME || cloudName;
+    apiKey    = process.env.CLOUDINARY_API_KEY    || apiKey;
+    apiSecret = process.env.CLOUDINARY_API_SECRET || apiSecret;
+  }
+
+  if (!apiSecret) {
+    console.error('[Cloudinary Sign] No API secret found. Set CLOUDINARY_URL on Render.');
+    return res.status(500).json({ error: 'Cloudinary API secret not configured on server. Set CLOUDINARY_URL env var.' });
+  }
+
+  const timestamp = Math.round(Date.now() / 1000);
+  const { createHash } = await import('crypto');
+  const strToSign = `timestamp=${timestamp}${apiSecret}`;
+  const signature = createHash('sha1').update(strToSign).digest('hex');
+
+  console.log(`[Cloudinary Sign] Issued signature for cloud: ${cloudName}, key: ${apiKey.slice(0, 6)}...`);
+  res.json({ timestamp, signature, apiKey, cloudName });
+});
+
+// ─── Cloudinary Upload Proxy ──────────────────────────────────
+// Proxies image uploads to Cloudinary using server-side signed credentials.
+// Accepts JSON: { file: base64DataUrl|remoteUrl, cloudName?, uploadPreset? }
+// Returns:      { secure_url: string, public_id: string }
+app.post('/api/upload', async (req, res) => {
+  const { file, cloudName: clientCloudName, uploadPreset: clientPreset } = req.body || {};
+
+  if (!file) {
+    return res.status(400).json({ error: 'No file data provided' });
+  }
+
+  // ── Parse CLOUDINARY_URL if set (format: cloudinary://api_key:api_secret@cloud_name)
+  let cloudName    = clientCloudName || 'dcix8pa5a';
+  let apiKey       = '379252623331886';
+  let apiSecret    = '';
+  let uploadPreset = clientPreset    || 'j5l8qibi';
+
+  const cloudinaryUrl = process.env.CLOUDINARY_URL || '';
+  if (cloudinaryUrl.startsWith('cloudinary://')) {
+    try {
+      const parsed  = new URL(cloudinaryUrl);
+      apiKey        = parsed.username  || apiKey;
+      apiSecret     = parsed.password  || apiSecret;
+      cloudName     = parsed.hostname  || cloudName;
+      console.log(`[Cloudinary Proxy] Parsed CLOUDINARY_URL → cloud: ${cloudName}, key: ${apiKey.slice(0,6)}...`);
+    } catch (e) {
+      console.warn('[Cloudinary Proxy] Failed to parse CLOUDINARY_URL:', e.message);
+    }
+  } else {
+    // Fall back to individual env vars
+    cloudName    = process.env.CLOUDINARY_CLOUD_NAME    || cloudName;
+    apiKey       = process.env.CLOUDINARY_API_KEY       || apiKey;
+    apiSecret    = process.env.CLOUDINARY_API_SECRET    || apiSecret;
+    uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || uploadPreset;
+  }
+
+  const uploadUrl = `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`;
+
+  try {
+    // Use native FormData (Node 18+ built-in — no extra packages needed)
+    const form = new FormData();
+    form.append('file', file);
+
+    if (apiSecret) {
+      // ── Signed Upload (preferred — no upload preset needed) ──
+      const timestamp = Math.round(Date.now() / 1000);
+      const { createHash } = await import('crypto');
+      const strToSign = `timestamp=${timestamp}${apiSecret}`;
+      const signature  = createHash('sha1').update(strToSign).digest('hex');
+
+      form.append('api_key',   apiKey);
+      form.append('timestamp', String(timestamp));
+      form.append('signature', signature);
+
+      console.log(`[Cloudinary Proxy] Signed upload → cloud: ${cloudName}`);
+    } else {
+      // ── Unsigned Upload (preset must exist and be set to Unsigned) ──
+      form.append('upload_preset', uploadPreset);
+      console.log(`[Cloudinary Proxy] Unsigned upload → preset: ${uploadPreset}`);
+    }
+
+    // Node 18+ has global fetch — no node-fetch required
+    const response = await fetch(uploadUrl, { method: 'POST', body: form });
+    const data     = await response.json();
+
+    if (!response.ok || !data.secure_url) {
+      const errMsg = data?.error?.message || JSON.stringify(data);
+      console.error('[Cloudinary Proxy] Cloudinary rejected upload:', errMsg);
+      return res.status(response.status || 500).json({ error: errMsg });
+    }
+
+    console.log(`[Cloudinary Proxy] ✅ Upload OK: ${data.secure_url}`);
+    return res.json({ secure_url: data.secure_url, public_id: data.public_id });
+
+  } catch (err) {
+    console.error('[Cloudinary Proxy] Unexpected error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
