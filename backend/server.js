@@ -295,31 +295,22 @@ async function getAdminTokens() {
 async function sendFCMPush(payload, targetRole = 'all') {
   if (!isFirebaseOnline || !db) return;
   try {
+    const messaging = getMessaging();
+    
+    if (targetRole === 'all') {
+      console.log('[FCM] Sending broadcast via Topic: all_users');
+      await messaging.send({
+        ...payload,
+        topic: 'all_users'
+      });
+      return;
+    }
+
     let tokens = [];
 
     if (targetRole === 'admin') {
       // Served from cache (memory/Redis)
       tokens = await getAdminTokens();
-    } else if (targetRole === 'all') {
-      // Served from the fcm_tokens cache (memory first, then Redis, then cold Firestore fetch)
-      tokens = [...cache.fcmTokens];
-      if (tokens.length === 0) {
-        // Try Redis before hitting Firestore
-        const redisTokens = await getCacheValue(cacheKeys.fcmTokens, null);
-        if (redisTokens && redisTokens.length > 0) {
-          console.log(`[FCM] Warm from Redis cache. Count: ${redisTokens.length}`);
-          cache.fcmTokens = redisTokens;
-          tokens = [...cache.fcmTokens];
-        } else {
-          // True cold-start: Firestore one-time fetch
-          console.log('[FCM] Cold-start: fetching fcm_tokens once to populate cache...');
-          const tokensSnap = await db.collection('fcm_tokens').get();
-          tokensSnap.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
-          const deduped = [...new Set(tokens)].filter(Boolean);
-          await setCacheValue(cacheKeys.fcmTokens, deduped); // persist to Redis too
-          tokens = deduped;
-        }
-      }
     } else {
       // Treat targetRole as a specific UID string
       // 1. Get tokens associated with this UID in fcm_tokens collection
@@ -341,7 +332,6 @@ async function sendFCMPush(payload, targetRole = 'all') {
     tokens = [...new Set(tokens)].filter(Boolean);
     if (tokens.length === 0) return;
 
-    const messaging = getMessaging();
     for (let i = 0; i < tokens.length; i += 500) {
       const batch = tokens.slice(i, i + 500);
       const message = {
@@ -1177,18 +1167,51 @@ app.post('/api/fcm/register', async (req, res) => {
   if (!isFirebaseOnline || !db) {
     return res.status(503).json({ error: 'Database service is unavailable' });
   }
-  const { token, uid, userAgent } = req.body;
+  const { token, uid, userAgent, deviceId } = req.body;
   if (!token) {
     return res.status(400).json({ error: 'Token is required' });
   }
   try {
+    const messaging = getMessaging();
+
+    // DUPLICATE TOKEN PROTECTION: Clean up old tokens for this device
+    if (deviceId && uid && uid !== 'guest') {
+      const staleSnap = await db.collection('fcm_tokens')
+        .where('uid', '==', uid)
+        .where('deviceId', '==', deviceId)
+        .get();
+        
+      const batch = db.batch();
+      const staleTokens = [];
+      staleSnap.forEach(doc => {
+        if (doc.id !== token) {
+          batch.delete(doc.ref);
+          staleTokens.push(doc.id);
+        }
+      });
+      
+      if (staleTokens.length > 0) {
+        await batch.commit();
+        if (messaging) await messaging.unsubscribeFromTopic(staleTokens, 'all_users').catch(() => {});
+        await db.collection('users').doc(uid).set({
+          fcmTokens: FieldValue.arrayRemove(...staleTokens)
+        }, { merge: true }).catch(() => {});
+      }
+    }
+
     // 1. Save to fcm_tokens collection
     await db.collection('fcm_tokens').doc(token).set({
       token,
       uid: uid || 'guest',
+      deviceId: deviceId || '',
       userAgent: userAgent || '',
       last_updated: FieldValue.serverTimestamp()
     }, { merge: true });
+
+    // Subscribe to all_users topic
+    if (messaging) {
+      await messaging.subscribeToTopic([token], 'all_users').catch(() => {});
+    }
 
     // 2. If user is logged in (has uid and not 'guest'), nest inside user doc
     if (uid && uid !== 'guest') {
@@ -1223,6 +1246,8 @@ app.post('/api/fcm/unregister', async (req, res) => {
     return res.status(400).json({ error: 'Token is required' });
   }
   try {
+    const messaging = getMessaging();
+
     if (logout) {
       // For logouts: Keep the token but update its uid to 'guest' so they still get broadcasts
       await db.collection('fcm_tokens').doc(token).set({
@@ -1232,6 +1257,10 @@ app.post('/api/fcm/unregister', async (req, res) => {
     } else {
       // For explicit disable: Delete from fcm_tokens collection completely
       await db.collection('fcm_tokens').doc(token).delete().catch(() => {});
+      // Unsubscribe from all_users topic
+      if (messaging) {
+        await messaging.unsubscribeFromTopic([token], 'all_users').catch(() => {});
+      }
     }
 
     // Remove from user's nested fcmTokens array
@@ -1256,6 +1285,34 @@ app.post('/api/fcm/unregister', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Proactive Stale Token Purging (Runs every 24 hours)
+setInterval(async () => {
+  if (!isFirebaseOnline || !db) return;
+  try {
+    console.log('[FCM Purge] Running daily stale token cleanup...');
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+    
+    const staleSnap = await db.collection('fcm_tokens')
+      .where('last_updated', '<', sixtyDaysAgo)
+      .get();
+      
+    if (staleSnap.empty) return;
+    
+    const batch = db.batch();
+    const staleTokens = [];
+    staleSnap.forEach(doc => {
+      batch.delete(doc.ref);
+      staleTokens.push(doc.id);
+    });
+    
+    await batch.commit();
+    console.log(`[FCM Purge] Deleted ${staleTokens.length} stale tokens.`);
+  } catch (err) {
+    console.error('[FCM Purge] Error:', err);
+  }
+}, 24 * 60 * 60 * 1000);
 
 // 8. Order Placement Proxy
 app.post('/api/orders', async (req, res) => {
