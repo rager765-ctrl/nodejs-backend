@@ -295,22 +295,31 @@ async function getAdminTokens() {
 async function sendFCMPush(payload, targetRole = 'all') {
   if (!isFirebaseOnline || !db) return;
   try {
-    const messaging = getMessaging();
-    
-    if (targetRole === 'all') {
-      console.log('[FCM] Sending broadcast via Topic: all_users');
-      await messaging.send({
-        ...payload,
-        topic: 'all_users'
-      });
-      return;
-    }
-
     let tokens = [];
 
     if (targetRole === 'admin') {
       // Served from cache (memory/Redis)
       tokens = await getAdminTokens();
+    } else if (targetRole === 'all') {
+      // Served from the fcm_tokens cache (memory first, then Redis, then cold Firestore fetch)
+      tokens = [...cache.fcmTokens];
+      if (tokens.length === 0) {
+        // Try Redis before hitting Firestore
+        const redisTokens = await getCacheValue(cacheKeys.fcmTokens, null);
+        if (redisTokens && redisTokens.length > 0) {
+          console.log(`[FCM] Warm from Redis cache. Count: ${redisTokens.length}`);
+          cache.fcmTokens = redisTokens;
+          tokens = [...cache.fcmTokens];
+        } else {
+          // True cold-start: Firestore one-time fetch
+          console.log('[FCM] Cold-start: fetching fcm_tokens once to populate cache...');
+          const tokensSnap = await db.collection('fcm_tokens').get();
+          tokensSnap.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
+          const deduped = [...new Set(tokens)].filter(Boolean);
+          await setCacheValue(cacheKeys.fcmTokens, deduped); // persist to Redis too
+          tokens = deduped;
+        }
+      }
     } else {
       // Treat targetRole as a specific UID string
       // 1. Get tokens associated with this UID in fcm_tokens collection
@@ -332,6 +341,7 @@ async function sendFCMPush(payload, targetRole = 'all') {
     tokens = [...new Set(tokens)].filter(Boolean);
     if (tokens.length === 0) return;
 
+    const messaging = getMessaging();
     for (let i = 0; i < tokens.length; i += 500) {
       const batch = tokens.slice(i, i + 500);
       const message = {
@@ -1043,29 +1053,8 @@ app.get('/api/sellers', (req, res) => {
 });
 
 // 5. Fetch Settings
-app.get('/api/settings', async (req, res) => {
-  if (Object.keys(cache.settings).length > 0) {
-    return res.json(cache.settings);
-  }
-  const redisSettings = await getCacheValue(cacheKeys.settings, null);
-  if (redisSettings) {
-    cache.settings = redisSettings;
-    return res.json(redisSettings);
-  }
-  // Fallback to one-time Firestore read if cache is completely empty
-  if (isFirebaseOnline && db) {
-    try {
-      const snap = await db.collection('settings').doc('global').get();
-      if (snap.exists) {
-        const data = snap.data();
-        await setCacheValue(cacheKeys.settings, data);
-        return res.json(data);
-      }
-    } catch (err) {
-      console.warn('[API Settings] Cold start fetch failed:', err.message);
-    }
-  }
-  res.json(mockData.settings || {});
+app.get('/api/settings', (req, res) => {
+  res.json(Object.keys(cache.settings).length > 0 ? cache.settings : mockData.settings);
 });
 
 app.post('/api/settings', async (req, res) => {
@@ -1164,68 +1153,43 @@ app.get('/api/visitors/detailed', async (req, res) => {
 
 // 7.7. FCM Token Registration Proxy
 app.post('/api/fcm/register', async (req, res) => {
-  if (!isFirebaseOnline || !db) {
-    return res.status(503).json({ error: 'Database service is unavailable' });
-  }
   const { token, uid, userAgent, deviceId } = req.body;
   if (!token) {
     return res.status(400).json({ error: 'Token is required' });
   }
   try {
-    const messaging = getMessaging();
-
-    // DUPLICATE TOKEN PROTECTION: Clean up old tokens for this device
-    if (deviceId && uid && uid !== 'guest') {
-      const staleSnap = await db.collection('fcm_tokens')
-        .where('uid', '==', uid)
-        .where('deviceId', '==', deviceId)
-        .get();
-        
-      const batch = db.batch();
-      const staleTokens = [];
-      staleSnap.forEach(doc => {
-        if (doc.id !== token) {
-          batch.delete(doc.ref);
-          staleTokens.push(doc.id);
-        }
-      });
-      
-      if (staleTokens.length > 0) {
-        await batch.commit();
-        if (messaging) await messaging.unsubscribeFromTopic(staleTokens, 'all_users').catch(() => {});
-        await db.collection('users').doc(uid).set({
-          fcmTokens: FieldValue.arrayRemove(...staleTokens)
-        }, { merge: true }).catch(() => {});
-      }
+    // Keep in-memory FCM cache updated
+    if (!cache.fcmTokens.includes(token)) {
+      cache.fcmTokens.push(token);
+    }
+    if (typeof cacheKeys !== 'undefined' && cacheKeys.fcmTokens) {
+      await setCacheValue(cacheKeys.fcmTokens, cache.fcmTokens).catch(() => {});
     }
 
-    // 1. Save to fcm_tokens collection
-    await db.collection('fcm_tokens').doc(token).set({
-      token,
-      uid: uid || 'guest',
-      deviceId: deviceId || '',
-      userAgent: userAgent || '',
-      last_updated: FieldValue.serverTimestamp()
-    }, { merge: true });
-
-    // Subscribe to all_users topic
-    if (messaging) {
-      await messaging.subscribeToTopic([token], 'all_users').catch(() => {});
-    }
-
-    // 2. If user is logged in (has uid and not 'guest'), nest inside user doc
-    if (uid && uid !== 'guest') {
-      await db.collection('users').doc(uid).set({
-        fcmTokens: FieldValue.arrayUnion(token)
+    if (isFirebaseOnline && db) {
+      // 1. Save to fcm_tokens collection (guest or user)
+      await db.collection('fcm_tokens').doc(token).set({
+        token,
+        uid: uid || 'guest',
+        userAgent: userAgent || '',
+        deviceId: deviceId || '',
+        last_updated: FieldValue.serverTimestamp()
       }, { merge: true });
 
-      // Invalidate admin push token cache in memory/Redis
-      _cachedAdminTokens = [];
-      _adminTokensCachedAt = 0;
-      if (isRedisOnline && redisClient) {
-        try {
-          await redisClient.del('kwabz:adminFcmTokens');
-        } catch (_) {}
+      // 2. If user is logged in (has uid and not 'guest'), nest inside user doc
+      if (uid && uid !== 'guest') {
+        await db.collection('users').doc(uid).set({
+          fcmTokens: FieldValue.arrayUnion(token)
+        }, { merge: true });
+
+        // Invalidate admin push token cache in memory/Redis
+        _cachedAdminTokens = [];
+        _adminTokensCachedAt = 0;
+        if (isRedisOnline && redisClient) {
+          try {
+            await redisClient.del('kwabz:adminFcmTokens');
+          } catch (_) {}
+        }
       }
     }
 
@@ -1238,33 +1202,37 @@ app.post('/api/fcm/register', async (req, res) => {
 
 // 7.8. FCM Token Unregistration Proxy
 app.post('/api/fcm/unregister', async (req, res) => {
-  if (!isFirebaseOnline || !db) {
-    return res.status(503).json({ error: 'Database service is unavailable' });
-  }
   const { token, uid, logout } = req.body;
   if (!token) {
     return res.status(400).json({ error: 'Token is required' });
   }
   try {
-    const messaging = getMessaging();
-
     if (logout) {
-      // For logouts: Keep the token but update its uid to 'guest' so they still get broadcasts
-      await db.collection('fcm_tokens').doc(token).set({
-        uid: 'guest',
-        last_updated: FieldValue.serverTimestamp()
-      }, { merge: true }).catch(() => {});
+      // For logouts: Keep the token active as 'guest' so the device still receives active/broadcast pushes
+      if (!cache.fcmTokens.includes(token)) {
+        cache.fcmTokens.push(token);
+      }
+      if (isFirebaseOnline && db) {
+        await db.collection('fcm_tokens').doc(token).set({
+          token,
+          uid: 'guest',
+          last_updated: FieldValue.serverTimestamp()
+        }, { merge: true }).catch(() => {});
+      }
     } else {
       // For explicit disable: Delete from fcm_tokens collection completely
-      await db.collection('fcm_tokens').doc(token).delete().catch(() => {});
-      // Unsubscribe from all_users topic
-      if (messaging) {
-        await messaging.unsubscribeFromTopic([token], 'all_users').catch(() => {});
+      cache.fcmTokens = cache.fcmTokens.filter(t => t !== token);
+      if (isFirebaseOnline && db) {
+        await db.collection('fcm_tokens').doc(token).delete().catch(() => {});
       }
     }
 
+    if (typeof cacheKeys !== 'undefined' && cacheKeys.fcmTokens) {
+      await setCacheValue(cacheKeys.fcmTokens, cache.fcmTokens).catch(() => {});
+    }
+
     // Remove from user's nested fcmTokens array
-    if (uid && uid !== 'guest') {
+    if (uid && uid !== 'guest' && isFirebaseOnline && db) {
       await db.collection('users').doc(uid).set({
         fcmTokens: FieldValue.arrayRemove(token)
       }, { merge: true }).catch(() => {});
@@ -1285,34 +1253,6 @@ app.post('/api/fcm/unregister', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// Proactive Stale Token Purging (Runs every 24 hours)
-setInterval(async () => {
-  if (!isFirebaseOnline || !db) return;
-  try {
-    console.log('[FCM Purge] Running daily stale token cleanup...');
-    const sixtyDaysAgo = new Date();
-    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-    
-    const staleSnap = await db.collection('fcm_tokens')
-      .where('last_updated', '<', sixtyDaysAgo)
-      .get();
-      
-    if (staleSnap.empty) return;
-    
-    const batch = db.batch();
-    const staleTokens = [];
-    staleSnap.forEach(doc => {
-      batch.delete(doc.ref);
-      staleTokens.push(doc.id);
-    });
-    
-    await batch.commit();
-    console.log(`[FCM Purge] Deleted ${staleTokens.length} stale tokens.`);
-  } catch (err) {
-    console.error('[FCM Purge] Error:', err);
-  }
-}, 24 * 60 * 60 * 1000);
 
 // 8. Order Placement Proxy
 app.post('/api/orders', async (req, res) => {
@@ -1361,27 +1301,8 @@ app.get('/api/promo-codes', (req, res) => {
   res.json(safeList);
 });
 
-app.get('/api/broadcasts', async (req, res) => {
-  if (cache.broadcasts.length > 0) {
-    return res.json(cache.broadcasts);
-  }
-  const redisBroadcasts = await getCacheValue(cacheKeys.broadcasts, null);
-  if (redisBroadcasts && redisBroadcasts.length > 0) {
-    cache.broadcasts = redisBroadcasts;
-    return res.json(redisBroadcasts);
-  }
-  // Fallback to one-time Firestore read
-  if (isFirebaseOnline && db) {
-    try {
-      const snap = await db.collection('broadcasts').get();
-      const broadcasts = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      await setCacheValue(cacheKeys.broadcasts, broadcasts);
-      return res.json(broadcasts);
-    } catch (err) {
-      console.warn('[API Broadcasts] Cold start fetch failed:', err.message);
-    }
-  }
-  res.json([]);
+app.get('/api/broadcasts', (req, res) => {
+  res.json(cache.broadcasts.length > 0 ? cache.broadcasts : []);
 });
 
 app.get('/api/reviews/:productId', async (req, res) => {
@@ -1605,10 +1526,23 @@ app.get('/api/feedback-config', (req, res) => {
 });
 
 app.post('/api/feedback-config', async (req, res) => {
-  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     const { id, config } = req.body;
-    await db.collection('feedback_form_config').doc(id).set(config);
+    if (!id) return res.status(400).json({ error: 'Missing form ID' });
+    const itemData = { id, ...(config || {}) };
+    const existingIdx = cache.feedbackConfig.findIndex(c => c.id === id);
+    if (existingIdx >= 0) {
+      cache.feedbackConfig[existingIdx] = itemData;
+    } else {
+      cache.feedbackConfig.push(itemData);
+    }
+    if (typeof cacheKeys !== 'undefined' && cacheKeys.feedbackConfig) {
+      await setCacheValue(cacheKeys.feedbackConfig, cache.feedbackConfig).catch(() => {});
+    }
+
+    if (isFirebaseOnline && db) {
+      await db.collection('feedback_form_config').doc(id).set(config || {});
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1616,9 +1550,16 @@ app.post('/api/feedback-config', async (req, res) => {
 });
 
 app.delete('/api/feedback-config/:id', async (req, res) => {
-  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
-    await db.collection('feedback_form_config').doc(req.params.id).delete();
+    const id = req.params.id;
+    cache.feedbackConfig = cache.feedbackConfig.filter(c => c.id !== id);
+    if (typeof cacheKeys !== 'undefined' && cacheKeys.feedbackConfig) {
+      await setCacheValue(cacheKeys.feedbackConfig, cache.feedbackConfig).catch(() => {});
+    }
+
+    if (isFirebaseOnline && db) {
+      await db.collection('feedback_form_config').doc(id).delete();
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
