@@ -413,6 +413,7 @@ let unsubscribers = {
   communications: null,
   orders: null,
   productNotifications: null,
+  bundles: null,
   fcmTokens: null
 };
 
@@ -698,7 +699,22 @@ function setupBackgroundSync() {
       await setCacheValue(cacheKeys.fcmTokens, deduped);
       console.log(`[Firestore Sync] fcm_tokens cache refreshed (memory + Redis). Count: ${deduped.length}`);
     }, err => {
-      console.error('[Firestore Sync] fcm_tokens snapshot failed:', err.message);
+      console.error('[Firestore Sync] fcmTokens snapshot failed:', err.message);
+    });
+
+  // Live Data Bundles Listener
+  unsubscribers.bundles = db.collection('bundles')
+    .onSnapshot(async snapshot => {
+      console.log(`[Firestore Sync] bundles collection updated. Syncing ${snapshot.size} items.`);
+      const bundles = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      bundles.sort((a, b) => {
+        if (a.network !== b.network) return (a.network || '').localeCompare(b.network || '');
+        return (a.price || 0) - (b.price || 0);
+      });
+      await setCacheValue(cacheKeys.bundles, bundles);
+      io.emit('bundles_changed', cache.bundles);
+    }, err => {
+      console.error('[Firestore Sync] Bundles snapshot failed:', err.message);
     });
 
   // 11. Live Food Categories Listener
@@ -1486,15 +1502,38 @@ app.delete('/api/food-items/:id', async (req, res) => {
 });
 
 // ─── Data Bundles Endpoints ──────────────────────────────────
-app.get('/api/bundles', (req, res) => {
-  res.json(cache.bundles.length > 0 ? cache.bundles : []);
+app.get('/api/bundles', async (req, res) => {
+  if (cache.bundles.length > 0) {
+    return res.json(cache.bundles);
+  }
+  if (!isFirebaseOnline || !db) return res.json([]);
+  try {
+    const snap = await db.collection('bundles').get();
+    const bundles = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    bundles.sort((a, b) => {
+      if (a.network !== b.network) return (a.network || '').localeCompare(b.network || '');
+      return (a.price || 0) - (b.price || 0);
+    });
+    await setCacheValue(cacheKeys.bundles, bundles);
+    res.json(bundles);
+  } catch (err) {
+    console.error('Failed to fetch bundles (cold start):', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/bundles', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     const docRef = await db.collection('bundles').add(req.body);
-    res.json({ id: docRef.id, ...req.body });
+    const bundleWithId = { id: docRef.id, ...req.body };
+    const updated = [...cache.bundles.filter(b => b.id !== docRef.id), bundleWithId];
+    updated.sort((a, b) => {
+      if (a.network !== b.network) return (a.network || '').localeCompare(b.network || '');
+      return (a.price || 0) - (b.price || 0);
+    });
+    await setCacheValue(cacheKeys.bundles, updated);
+    res.json(bundleWithId);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1504,7 +1543,15 @@ app.put('/api/bundles/:id', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('bundles').doc(req.params.id).set(req.body, { merge: true });
-    res.json({ id: req.params.id, ...req.body });
+    const bundleWithId = { id: req.params.id, ...req.body };
+    const updated = cache.bundles.map(b => b.id === req.params.id ? { ...b, ...req.body } : b);
+    if (!updated.some(b => b.id === req.params.id)) updated.push(bundleWithId);
+    updated.sort((a, b) => {
+      if (a.network !== b.network) return (a.network || '').localeCompare(b.network || '');
+      return (a.price || 0) - (b.price || 0);
+    });
+    await setCacheValue(cacheKeys.bundles, updated);
+    res.json(bundleWithId);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1514,6 +1561,8 @@ app.delete('/api/bundles/:id', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('bundles').doc(req.params.id).delete();
+    const updated = cache.bundles.filter(b => b.id !== req.params.id);
+    await setCacheValue(cacheKeys.bundles, updated);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
