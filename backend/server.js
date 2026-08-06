@@ -490,7 +490,34 @@ function setupBackgroundSync() {
       // We need to keep a snapshot of the previous cache to detect status changes
       const previousOrders = [...cache.orders];
       
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const rawOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const seenKeys = new Set();
+      const orders = [];
+      const duplicateIdsToDelete = [];
+
+      for (const order of rawOrders) {
+        const key = order.tracking_number || order.trackingNumber || order.order_label || order.order_number || order.orderId;
+        if (key) {
+          if (seenKeys.has(key)) {
+            // Stray duplicate document in Firestore created prior to doc(orderId).set fix
+            if (order.id && order.id !== key) {
+              duplicateIdsToDelete.push(order.id);
+            }
+            continue;
+          }
+          seenKeys.add(key);
+        }
+        orders.push(order);
+      }
+
+      // Automatically purge stray duplicate documents from Firestore in background
+      if (duplicateIdsToDelete.length > 0) {
+        console.log(`[Firestore Sync] Purging ${duplicateIdsToDelete.length} legacy duplicate order docs...`);
+        duplicateIdsToDelete.forEach(dupId => {
+          db.collection('orders').doc(dupId).delete().catch(e => console.warn('Silent cleanup duplicate doc error:', dupId, e));
+        });
+      }
+
       await setCacheValue(cacheKeys.orders, orders);
       io.emit('orders_changed', cache.orders);
 
@@ -501,13 +528,15 @@ function setupBackgroundSync() {
 
       snapshot.docChanges().forEach(change => {
         const order = change.doc.data();
+        const displayOrderNum = order.tracking_number || order.trackingNumber || order.order_label || order.order_number || order.orderId || order.id || change.doc.id;
+        const customerUid = order.customer_uid || order.uid;
         
         if (change.type === 'added') {
           // Notify Admin
           sendFCMPush({
             data: {
               title: '🔔 New Order Received!',
-              body: `Order ${order.order_label || order.order_number || ('#' + change.doc.id)} for GH₵ ${Number(order.total_amount || order.total_price || 0).toFixed(2)}`,
+              body: `Order ${displayOrderNum} for GH₵ ${Number(order.total_amount || order.total_price || order.total || 0).toFixed(2)}`,
               url: '/admin-orders.html'
             }
           }, 'admin');
@@ -517,36 +546,42 @@ function setupBackgroundSync() {
             sendFCMPush({
               data: {
                 title: '🛍️ New Order Received!',
-                body: `You received order ${order.order_label || order.order_number || ('#' + change.doc.id)} for GH₵ ${Number(order.total_amount || order.total_price || 0).toFixed(2)}`,
+                body: `You received order ${displayOrderNum} for GH₵ ${Number(order.total_amount || order.total_price || order.total || 0).toFixed(2)}`,
                 url: '/seller-dashboard.html?tab=orders'
               }
             }, order.seller_id);
           }
         } 
         else if (change.type === 'modified') {
-          const oldOrder = previousOrders.find(o => o.id === change.doc.id);
+          const oldOrder = previousOrders.find(o => o.id === change.doc.id || o.orderId === change.doc.id);
           if (oldOrder && oldOrder.status !== order.status && order.status) {
              // Notify Customer
-             if (order.customer_uid) {
+             if (customerUid) {
                sendFCMPush({
                  data: {
                    title: `📦 Order Update: ${order.status.toUpperCase()}`,
-                   body: `Your order ${order.order_label || order.order_number || ('#' + change.doc.id)} status is now ${order.status}.`,
+                   body: `Your order ${displayOrderNum} status is now ${order.status}.`,
                    url: '/account.html?tab=orders'
                  }
-               }, order.customer_uid);
+               }, customerUid);
              }
              // Notify Seller
              if (order.seller_id && order.seller_id !== 'main') {
                sendFCMPush({
                  data: {
                    title: `📦 Order Update: ${order.status.toUpperCase()}`,
-                   body: `Order ${order.order_label || order.order_number || ('#' + change.doc.id)} status is now ${order.status}.`,
+                   body: `Order ${displayOrderNum} status is now ${order.status}.`,
                    url: '/seller-dashboard.html?tab=orders'
                  }
                }, order.seller_id);
              }
           }
+        }
+        else if (change.type === 'removed') {
+          console.log(`[Firestore Sync] Order ${change.doc.id} deleted from Firestore. Updating cache...`);
+          cache.orders = cache.orders.filter(o => o.id !== change.doc.id && o.orderId !== change.doc.id);
+          setCacheValue(cacheKeys.orders, cache.orders);
+          io.emit('orders_changed', cache.orders);
         }
       });
     }, err => {
@@ -1278,10 +1313,40 @@ app.post('/api/orders', async (req, res) => {
   try {
     const orderData = req.body;
     orderData.created_at = orderData.created_at || new Date().toISOString();
-    const docRef = await db.collection('orders').add(orderData);
-    res.status(201).json({ id: docRef.id, ...orderData });
+    
+    // Check if a specific order ID or tracking number is provided to prevent duplicate doc creation
+    const targetDocId = orderData.orderId || orderData.id || orderData.order_number || orderData.tracking_number;
+    
+    if (targetDocId) {
+      await db.collection('orders').doc(targetDocId).set(orderData, { merge: true });
+      console.log(`[REST API] Order saved under docId: ${targetDocId}`);
+      res.status(201).json({ id: targetDocId, ...orderData });
+    } else {
+      const docRef = await db.collection('orders').add(orderData);
+      console.log(`[REST API] Order added under auto-id: ${docRef.id}`);
+      res.status(201).json({ id: docRef.id, ...orderData });
+    }
   } catch (err) {
     console.error('Failed to create order:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8.5. Admin Order Deletion Proxy
+app.delete('/api/orders/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) {
+    return res.status(503).json({ error: 'Database service is unavailable' });
+  }
+  try {
+    const orderId = req.params.id;
+    await db.collection('orders').doc(orderId).delete();
+    cache.orders = cache.orders.filter(o => o.id !== orderId && o.orderId !== orderId);
+    await setCacheValue(cacheKeys.orders, cache.orders);
+    io.emit('orders_changed', cache.orders);
+    console.log(`[REST API] Deleted order ${orderId} from Firestore & Cache`);
+    res.json({ success: true, id: orderId });
+  } catch (err) {
+    console.error('Failed to delete order:', err);
     res.status(500).json({ error: err.message });
   }
 });
