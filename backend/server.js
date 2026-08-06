@@ -1339,8 +1339,16 @@ app.delete('/api/orders/:id', async (req, res) => {
   }
   try {
     const orderId = req.params.id;
-    await db.collection('orders').doc(orderId).delete();
-    cache.orders = cache.orders.filter(o => o.id !== orderId && o.orderId !== orderId);
+    try {
+      await db.collection('orders').doc(orderId).delete();
+    } catch (_) {}
+    cache.orders = cache.orders.filter(o => 
+      o.id !== orderId && 
+      o.orderId !== orderId && 
+      o.tracking_number !== orderId && 
+      o.order_number !== orderId && 
+      o.order_label !== orderId
+    );
     await setCacheValue(cacheKeys.orders, cache.orders);
     io.emit('orders_changed', cache.orders);
     console.log(`[REST API] Deleted order ${orderId} from Firestore & Cache`);
