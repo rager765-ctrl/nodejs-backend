@@ -117,7 +117,30 @@ try {
   isRedisOnline = false;
 }
 
+// ─── Socket Payload Sanitizer (Strips heavy Base64 strings to save bandwidth) ───
+function sanitizeForSocket(obj) {
+  if (!obj) return obj;
+  if (typeof obj === 'string') {
+    if (obj.startsWith('data:image/') && obj.length > 500) {
+      return ''; // Omit inline base64 image strings from socket broadcasts
+    }
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeForSocket);
+  }
+  if (typeof obj === 'object') {
+    const clean = {};
+    for (const key of Object.keys(obj)) {
+      clean[key] = sanitizeForSocket(obj[key]);
+    }
+    return clean;
+  }
+  return obj;
+}
+
 // ─── Redis & local Cache Helpers ──────────────────────────────
+
 const cacheKeys = {
   products: 'kwabz:products',
   categories: 'kwabz:categories',
@@ -433,8 +456,8 @@ function setupBackgroundSync() {
       // In-memory sort by created_at desc
       products.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
       await setCacheValue(cacheKeys.products, products);
-      // Broadcast real-time change to all connected socket clients (0 Firestore read cost!)
-      io.emit('products_changed', cache.products);
+      // Broadcast real-time change to all connected socket clients (sanitized payload)
+      io.emit('products_changed', sanitizeForSocket(cache.products));
     }, err => {
       console.error('[Firestore Sync] Products snapshot failed:', err.message);
     });
@@ -445,7 +468,7 @@ function setupBackgroundSync() {
       console.log(`[Firestore Sync] categories collection updated. Syncing ${snapshot.size} items.`);
       const categories = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       await setCacheValue(cacheKeys.categories, categories);
-      io.emit('categories_changed', cache.categories);
+      io.emit('categories_changed', sanitizeForSocket(cache.categories));
     }, err => {
       console.error('[Firestore Sync] Categories snapshot failed:', err.message);
     });
@@ -457,7 +480,7 @@ function setupBackgroundSync() {
       console.log(`[Firestore Sync] sellers collection updated. Syncing ${snapshot.size} items.`);
       const sellers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       await setCacheValue(cacheKeys.sellers, sellers);
-      io.emit('sellers_changed', cache.sellers);
+      io.emit('sellers_changed', sanitizeForSocket(cache.sellers));
 
       if (isInitialSellers) {
         isInitialSellers = false;
@@ -1939,18 +1962,17 @@ io.on('connection', (socket) => {
   // Send active visitor count immediately to new dashboards
   socket.emit('visitor_count_updated', activeVisitors.size);
 
-  // Send caches immediately so they don't wait for a background tick
-  if (cache.products.length > 0) socket.emit('products_changed', cache.products);
-  if (cache.categories.length > 0) socket.emit('categories_changed', cache.categories);
-  if (cache.sellers.length > 0) socket.emit('sellers_changed', cache.sellers);
-  if (cache.orders.length > 0) socket.emit('orders_changed', cache.orders);
-  if (Object.keys(cache.settings).length > 0) socket.emit('settings_changed', cache.settings);
-  if (cache.foodCategories.length > 0) socket.emit('food_categories_changed', cache.foodCategories);
-  if (cache.foodItems.length > 0) socket.emit('food_items_changed', cache.foodItems);
-  if (cache.bundles.length > 0) socket.emit('bundles_changed', cache.bundles);
-  if (cache.feedbackConfig.length > 0) socket.emit('feedback_config_changed', cache.feedbackConfig);
-  if (cache.feedbackSubmissions.length > 0) socket.emit('feedback_submissions_changed', cache.feedbackSubmissions);
-  if (cache.gigs.length > 0) socket.emit('gigs_changed', cache.gigs);
+  // Demand-driven cache sync: clients can request specific datasets on-demand
+  // instead of auto-dumping 11 full memory arrays on every connection
+  socket.on('request_sync', (type) => {
+    if (type === 'products' && cache.products.length > 0) socket.emit('products_changed', sanitizeForSocket(cache.products));
+    else if (type === 'categories' && cache.categories.length > 0) socket.emit('categories_changed', sanitizeForSocket(cache.categories));
+    else if (type === 'sellers' && cache.sellers.length > 0) socket.emit('sellers_changed', sanitizeForSocket(cache.sellers));
+    else if (type === 'orders' && cache.orders.length > 0) socket.emit('orders_changed', sanitizeForSocket(cache.orders));
+    else if (type === 'settings' && Object.keys(cache.settings).length > 0) socket.emit('settings_changed', sanitizeForSocket(cache.settings));
+    else if (type === 'gigs' && cache.gigs.length > 0) socket.emit('gigs_changed', sanitizeForSocket(cache.gigs));
+    else if (type === 'bundles' && cache.bundles.length > 0) socket.emit('bundles_changed', sanitizeForSocket(cache.bundles));
+  });
 
   // Respond to client keep-alive pings (prevents Render free-tier sleep)
   socket.on('ping_keepalive', () => {
@@ -1962,13 +1984,10 @@ io.on('connection', (socket) => {
   });
 });
 
-// ─── Render 24/7 Keep-Alive Self-Ping ─────────────────────────
+// ─── Render Keep-Alive Self-Ping ──────────────────────────────
 // NOTE: Render free tier now IGNORES self-pings from the same instance.
-// The self-ping below is a fallback. For reliable uptime, point an EXTERNAL
-// free cron service (e.g. https://cron-job.org) to:
-//   GET  https://your-app.onrender.com/api/ping   (every 4 minutes)
-//
-// Set EXTERNAL_PING_URL in Render env vars to enable cross-service waking.
+// For reliable uptime, point an EXTERNAL free cron service (e.g. https://cron-job.org) to:
+//   GET  https://your-app.onrender.com/api/ping   (every 10 minutes)
 
 function safePing(rawUrl, label) {
   try {
@@ -2001,17 +2020,17 @@ const candidateUrls = [
 // Map to the lightweight /api/ping endpoint (not /api/health which does more work)
 const pingUrls = [...new Set(candidateUrls)].map(url => `${url.replace(/\/$/, '')}/api/ping`);
 
-console.log(`📡 Keep-Alive: Self-pinging every 4 min for:`, pingUrls);
+console.log(`📡 Keep-Alive: Self-pinging every 10 min for:`, pingUrls);
 
-// Self-ping every 4 minutes (belt-and-suspenders; external cron is the true fix)
+// Self-ping every 10 minutes (bandwidth optimized)
 setInterval(() => {
   pingUrls.forEach(url => safePing(url, 'Self'));
 
-  // Also wake any external partner URL if configured (e.g., the WhatsApp bot server)
+  // Also wake any external partner URL if configured
   if (process.env.EXTERNAL_PING_URL) {
     safePing(process.env.EXTERNAL_PING_URL, 'External');
   }
-}, 4 * 60 * 1000); // Every 4 minutes
+}, 10 * 60 * 1000); // Every 10 minutes
 
 // Start Server
 httpServer.listen(PORT, () => {
