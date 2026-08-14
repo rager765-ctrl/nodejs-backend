@@ -1274,6 +1274,81 @@ app.post('/api/fcm/register', async (req, res) => {
   }
 });
 
+// 7.8. FCM Token Deduplication & Cleanup API
+app.post('/api/fcm/clean-duplicates', async (req, res) => {
+  if (!isFirebaseOnline || !db) {
+    return res.status(503).json({ error: 'Database service is unavailable' });
+  }
+  try {
+    const { uid } = req.body || {};
+    let query = db.collection('fcm_tokens');
+    if (uid && uid !== 'guest') {
+      query = query.where('uid', '==', uid);
+    }
+    const snap = await query.get();
+    const userGroups = new Map();
+
+    snap.forEach(doc => {
+      const data = doc.data();
+      const userKey = data.uid || 'guest';
+      if (!userGroups.has(userKey)) userGroups.set(userKey, []);
+      userGroups.get(userKey).push({ id: doc.id, ...data });
+    });
+
+    let deletedCount = 0;
+    const batch = db.batch();
+
+    for (const [groupUid, docs] of userGroups.entries()) {
+      if (groupUid === 'guest') continue;
+      if (docs.length <= 1) continue;
+
+      // Sort by last_updated descending (newest first)
+      docs.sort((a, b) => {
+        const getTs = (item) => {
+          const val = item.last_updated || item.updatedAt || item.created_at || item.timestamp;
+          if (!val) return 0;
+          if (typeof val === 'number') return val;
+          if (typeof val.toDate === 'function') return val.toDate().getTime();
+          if (typeof val.seconds === 'number') return val.seconds * 1000;
+          if (typeof val === 'string') {
+            const p = Date.parse(val);
+            return isNaN(p) ? 0 : p;
+          }
+          return 0;
+        };
+        return getTs(b) - getTs(a);
+      });
+
+      const recentDoc = docs[0];
+      const deadDocs = docs.slice(1);
+
+      for (const dead of deadDocs) {
+        batch.delete(db.collection('fcm_tokens').doc(dead.id));
+        deletedCount++;
+      }
+
+      if (groupUid && groupUid !== 'guest') {
+        const userRef = db.collection('users').doc(groupUid);
+        batch.set(userRef, { fcmTokens: [recentDoc.token || recentDoc.id] }, { merge: true });
+      }
+    }
+
+    if (deletedCount > 0) {
+      await batch.commit();
+      cache.fcmTokens = [];
+      if (typeof cacheKeys !== 'undefined' && cacheKeys.fcmTokens) {
+        await setCacheValue(cacheKeys.fcmTokens, []).catch(() => {});
+      }
+    }
+
+    console.log(`[FCM Cleanup] Pruned ${deletedCount} duplicate dead-end tokens.`);
+    res.json({ success: true, deletedCount });
+  } catch (err) {
+    console.error('[FCM Cleanup] Failed to prune duplicate tokens:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 7.8. FCM Token Unregistration Proxy
 app.post('/api/fcm/unregister', async (req, res) => {
   const { token, uid, logout } = req.body;
@@ -1614,6 +1689,52 @@ app.get('/api/bundles', async (req, res) => {
     res.json(bundles);
   } catch (err) {
     console.error('Failed to fetch bundles (cold start):', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bundles/clean-duplicates', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const snap = await db.collection('bundles').get();
+    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    const seen = new Map();
+    const duplicates = [];
+
+    for (const item of docs) {
+      const key = `${(item.network || '').toLowerCase().trim()}_${(item.name || '').toLowerCase().trim()}_${item.price}`;
+      if (seen.has(key)) {
+        const existing = seen.get(key);
+        if (existing.in_stock === false && item.in_stock !== false) {
+          duplicates.push(existing.id);
+          seen.set(key, item);
+        } else {
+          duplicates.push(item.id);
+        }
+      } else {
+        seen.set(key, item);
+      }
+    }
+
+    if (duplicates.length > 0) {
+      const batch = db.batch();
+      duplicates.forEach(id => batch.delete(db.collection('bundles').doc(id)));
+      await batch.commit();
+    }
+
+    // Refresh cache
+    const freshSnap = await db.collection('bundles').get();
+    const freshBundles = freshSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    freshBundles.sort((a, b) => {
+      if (a.network !== b.network) return (a.network || '').localeCompare(b.network || '');
+      return (a.price || 0) - (b.price || 0);
+    });
+    await setCacheValue(cacheKeys.bundles, freshBundles);
+
+    res.json({ success: true, removedCount: duplicates.length });
+  } catch (err) {
+    console.error('Clean duplicate bundles error:', err);
     res.status(500).json({ error: err.message });
   }
 });
