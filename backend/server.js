@@ -84,6 +84,7 @@ const cache = {
   foodItems: [],
   bundles: [],
   gigs: [],
+  thrift: [],
   feedbackConfig: [],
   feedbackSubmissions: [],
   reviews: {}, // productId -> reviews array
@@ -156,6 +157,7 @@ const cacheKeys = {
   feedbackConfig: 'kwabz:feedbackConfig',
   feedbackSubmissions: 'kwabz:feedbackSubmissions',
   gigs: 'kwabz:gigs',
+  thrift: 'kwabz:thrift',
   fcmTokens: 'kwabz:fcmTokens',   // All push subscriber tokens
   reviews: (productId) => `kwabz:reviews:${productId}`
 };
@@ -176,6 +178,7 @@ async function setCacheValue(key, value, ttlSeconds = null) {
   else if (key === cacheKeys.feedbackConfig) cache.feedbackConfig = value;
   else if (key === cacheKeys.feedbackSubmissions) cache.feedbackSubmissions = value;
   else if (key === cacheKeys.gigs) cache.gigs = value;
+  else if (key === cacheKeys.thrift) cache.thrift = value;
   else if (key === cacheKeys.fcmTokens) cache.fcmTokens = value; // FCM tokens in memory
   else if (key.startsWith('kwabz:reviews:')) {
     const prodId = key.replace('kwabz:reviews:', '');
@@ -1781,6 +1784,72 @@ app.delete('/api/bundles/:id', async (req, res) => {
     const updated = cache.bundles.filter(b => b.id !== req.params.id);
     await setCacheValue(cacheKeys.bundles, updated);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Campus Thrift & Dashouts Endpoints ─────────────────────
+app.get('/api/thrift', async (req, res) => {
+  if (cache.thrift.length > 0) {
+    return res.json(cache.thrift);
+  }
+  if (!isFirebaseOnline || !db) return res.json([]);
+  try {
+    const snap = await db.collection('thrift_items').get();
+    const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    items.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    await setCacheValue(cacheKeys.thrift, items);
+    res.json(items);
+  } catch (err) {
+    console.error('Failed to fetch thrift items:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/thrift', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const itemData = req.body;
+    let docId = itemData.id;
+    if (!docId) {
+      const docRef = await db.collection('thrift_items').add(itemData);
+      docId = docRef.id;
+    } else {
+      await db.collection('thrift_items').doc(docId).set(itemData, { merge: true });
+    }
+    const itemWithId = { id: docId, ...itemData };
+    const updated = [itemWithId, ...cache.thrift.filter(i => i.id !== docId)];
+    updated.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    await setCacheValue(cacheKeys.thrift, updated);
+    res.json(itemWithId);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/thrift/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('thrift_items').doc(req.params.id).set(req.body, { merge: true });
+    const itemWithId = { id: req.params.id, ...req.body };
+    const updated = cache.thrift.map(i => i.id === req.params.id ? { ...i, ...req.body } : i);
+    if (!updated.some(i => i.id === req.params.id)) updated.unshift(itemWithId);
+    updated.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    await setCacheValue(cacheKeys.thrift, updated);
+    res.json(itemWithId);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/thrift/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('thrift_items').doc(req.params.id).delete();
+    const updated = cache.thrift.filter(i => i.id !== req.params.id);
+    await setCacheValue(cacheKeys.thrift, updated);
+    res.json({ success: true, id: req.params.id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
