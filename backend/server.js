@@ -1855,6 +1855,128 @@ app.delete('/api/thrift/:id', async (req, res) => {
   }
 });
 
+// ─── Campus Lost & Found Endpoints ─────────────────────
+app.get('/api/lost-found', async (req, res) => {
+  if (cache.lostFound && cache.lostFound.length > 0) {
+    return res.json(cache.lostFound);
+  }
+  if (!isFirebaseOnline || !db) return res.json([]);
+  try {
+    const snap = await db.collection('lost_found').get();
+    const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    items.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    if (cacheKeys.lostFound) await setCacheValue(cacheKeys.lostFound, items);
+    res.json(items);
+  } catch (err) {
+    console.error('Failed to fetch lost_found items:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/lost-found', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const itemData = req.body;
+    let docId = itemData.id;
+    if (!docId) {
+      const docRef = await db.collection('lost_found').add(itemData);
+      docId = docRef.id;
+    } else {
+      await db.collection('lost_found').doc(docId).set(itemData, { merge: true });
+    }
+    const itemWithId = { id: docId, ...itemData };
+    const current = cache.lostFound || [];
+    const updated = [itemWithId, ...current.filter(i => i.id !== docId)];
+    updated.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    if (cacheKeys.lostFound) await setCacheValue(cacheKeys.lostFound, updated);
+    res.json(itemWithId);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/lost-found/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('lost_found').doc(req.params.id).set(req.body, { merge: true });
+    const itemWithId = { id: req.params.id, ...req.body };
+    const current = cache.lostFound || [];
+    const updated = current.map(i => i.id === req.params.id ? { ...i, ...req.body } : i);
+    if (!updated.some(i => i.id === req.params.id)) updated.unshift(itemWithId);
+    updated.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    if (cacheKeys.lostFound) await setCacheValue(cacheKeys.lostFound, updated);
+    res.json(itemWithId);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/lost-found/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('lost_found').doc(req.params.id).delete();
+    const current = cache.lostFound || [];
+    const updated = current.filter(i => i.id !== req.params.id);
+    if (cacheKeys.lostFound) await setCacheValue(cacheKeys.lostFound, updated);
+    res.json({ success: true, id: req.params.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Campus Pulse & Polls Endpoints ─────────────────────
+app.get('/api/pulse', async (req, res) => {
+  if (cache.polls && cache.polls.length > 0) {
+    return res.json(cache.polls);
+  }
+  if (!isFirebaseOnline || !db) return res.json([]);
+  try {
+    const snap = await db.collection('polls').get();
+    const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    items.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    if (cacheKeys.polls) await setCacheValue(cacheKeys.polls, items);
+    res.json(items);
+  } catch (err) {
+    console.error('Failed to fetch polls:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/pulse', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    const itemData = req.body;
+    let docId = itemData.id;
+    if (!docId) {
+      const docRef = await db.collection('polls').add(itemData);
+      docId = docRef.id;
+    } else {
+      await db.collection('polls').doc(docId).set(itemData, { merge: true });
+    }
+    const itemWithId = { id: docId, ...itemData };
+    const current = cache.polls || [];
+    const updated = [itemWithId, ...current.filter(i => i.id !== docId)];
+    updated.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    if (cacheKeys.polls) await setCacheValue(cacheKeys.polls, updated);
+    res.json(itemWithId);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/pulse/:id', async (req, res) => {
+  if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
+  try {
+    await db.collection('polls').doc(req.params.id).delete();
+    const current = cache.polls || [];
+    const updated = current.filter(i => i.id !== req.params.id);
+    if (cacheKeys.polls) await setCacheValue(cacheKeys.polls, updated);
+    res.json({ success: true, id: req.params.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Feedback Config & Submissions Endpoints ─────────────────
 app.get('/api/feedback-config', (req, res) => {
   res.json(cache.feedbackConfig.length > 0 ? cache.feedbackConfig : []);
