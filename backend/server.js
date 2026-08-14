@@ -961,6 +961,80 @@ function setupBackgroundSync() {
     }, err => {
       console.error('[Firestore Sync] Communications snapshot failed:', err.message);
     });
+
+  // 19. Live Thrift Items Listener (Campus Push)
+  let isInitialThrift = true;
+  db.collection('thrift_items')
+    .orderBy('created_at', 'desc')
+    .limit(50)
+    .onSnapshot(snapshot => {
+      if (isInitialThrift) { isInitialThrift = false; return; }
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const item = change.doc.data();
+          if (item.status === 'sold') return; // skip sold items
+          const priceStr = item.price ? `GH₵ ${Number(item.price).toFixed(2)}` : 'Free';
+          sendFCMPush({
+            data: {
+              title: '🛍️ New Campus Thrift Drop!',
+              body: `${item.title || 'A new item'} — ${priceStr}. Grab it before it's gone!`,
+              image_url: item.image_url || '',
+              url: '/thrift.html'
+            }
+          }, 'all');
+        }
+      });
+    }, err => {
+      console.error('[Firestore Sync] thrift_items snapshot failed:', err.message);
+    });
+
+  // 20. Live Lost & Found Listener (Campus Push)
+  let isInitialLostFound = true;
+  db.collection('lost_found')
+    .orderBy('created_at', 'desc')
+    .limit(50)
+    .onSnapshot(snapshot => {
+      if (isInitialLostFound) { isInitialLostFound = false; return; }
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const item = change.doc.data();
+          const isLost = item.item_type === 'lost';
+          sendFCMPush({
+            data: {
+              title: isLost ? '🔍 Lost Item Reported on Campus' : '✅ Found Item Reported on Campus',
+              body: `"${item.title || 'An item'}" — ${item.location || 'Campus'}. Tap to help!`,
+              image_url: item.image_url || '',
+              url: '/lost-found.html'
+            }
+          }, 'all');
+        }
+      });
+    }, err => {
+      console.error('[Firestore Sync] lost_found snapshot failed:', err.message);
+    });
+
+  // 21. Live Campus Polls Listener (Campus Push)
+  let isInitialPolls = true;
+  db.collection('polls')
+    .orderBy('created_at', 'desc')
+    .limit(50)
+    .onSnapshot(snapshot => {
+      if (isInitialPolls) { isInitialPolls = false; return; }
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const poll = change.doc.data();
+          sendFCMPush({
+            data: {
+              title: '🗳️ New Campus Poll — Cast Your Vote!',
+              body: poll.question || 'A new campus poll is live. Make your voice heard!',
+              url: '/pulse.html'
+            }
+          }, 'all');
+        }
+      });
+    }, err => {
+      console.error('[Firestore Sync] polls snapshot failed:', err.message);
+    });
 }
 
 // ─── Memory Visitor Heartbeat Sweep Task ─────────────────────
