@@ -2109,15 +2109,34 @@ app.delete('/api/feedback-config/:id', async (req, res) => {
   }
 });
 
-app.get('/api/feedback-submissions', (req, res) => {
-  res.json(cache.feedbackSubmissions.length > 0 ? cache.feedbackSubmissions : []);
+app.get('/api/feedback-submissions', async (req, res) => {
+  const cached = await getCacheValue(cacheKeys.feedbackSubmissions, null);
+  if (cached && Array.isArray(cached) && cached.length > 0) return res.json(cached);
+  if (cache.feedbackSubmissions && cache.feedbackSubmissions.length > 0) return res.json(cache.feedbackSubmissions);
+
+  if (!isFirebaseOnline || !db) return res.json([]);
+  try {
+    const snap = await db.collection('feedback_submissions').limit(300).get();
+    const subs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    subs.sort((a, b) => getSafeTime(b.created_at) - getSafeTime(a.created_at));
+    await setCacheValue(cacheKeys.feedbackSubmissions, subs);
+    res.json(subs);
+  } catch (err) {
+    console.error('Failed to fetch feedback submissions:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/feedback-submissions', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
-    const docRef = await db.collection('feedback_submissions').add(req.body);
-    res.json({ id: docRef.id, ...req.body });
+    const body = req.body;
+    body.created_at = body.created_at || new Date().toISOString();
+    const docRef = await db.collection('feedback_submissions').add(body);
+    const subWithId = { id: docRef.id, ...body };
+    const updated = [subWithId, ...(cache.feedbackSubmissions || []).filter(s => s.id !== docRef.id)];
+    await setCacheValue(cacheKeys.feedbackSubmissions, updated);
+    res.json(subWithId);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2127,6 +2146,9 @@ app.put('/api/feedback-submissions/:id', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('feedback_submissions').doc(req.params.id).update(req.body);
+    const current = cache.feedbackSubmissions || [];
+    const updated = current.map(s => s.id === req.params.id ? { ...s, ...req.body } : s);
+    await setCacheValue(cacheKeys.feedbackSubmissions, updated);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2137,6 +2159,8 @@ app.delete('/api/feedback-submissions/:id', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('feedback_submissions').doc(req.params.id).delete();
+    const updated = (cache.feedbackSubmissions || []).filter(s => s.id !== req.params.id);
+    await setCacheValue(cacheKeys.feedbackSubmissions, updated);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
