@@ -753,6 +753,8 @@ function setupBackgroundSync() {
   // FCM Tokens Live Listener — keeps cache.fcmTokens in sync (memory + Redis)
   // so sendFCMPush('all') never scans the full Firestore collection on every push.
   unsubscribers.fcmTokens = db.collection('fcm_tokens')
+    .orderBy('created_at', 'desc')
+    .limit(500)
     .onSnapshot(async snapshot => {
       const tokens = [];
       snapshot.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
@@ -798,18 +800,6 @@ function setupBackgroundSync() {
       io.emit('food_items_changed', cache.foodItems);
     }, err => {
       console.error('[Firestore Sync] Food items snapshot failed:', err.message);
-    });
-
-  // 13. Live Bundles Listener
-  unsubscribers.bundles = db.collection('bundles')
-    .onSnapshot(async snapshot => {
-      console.log(`[Firestore Sync] bundles updated. Syncing ${snapshot.size} items.`);
-      const bunds = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      bunds.sort((a, b) => (parseFloat(a.price) || 0) - (parseFloat(b.price) || 0));
-      await setCacheValue(cacheKeys.bundles, bunds);
-      io.emit('bundles_changed', cache.bundles);
-    }, err => {
-      console.error('[Firestore Sync] Bundles snapshot failed:', err.message);
     });
 
   // 14. Live Feedback Config Listener
