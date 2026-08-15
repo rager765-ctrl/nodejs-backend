@@ -85,6 +85,8 @@ const cache = {
   bundles: [],
   gigs: [],
   thrift: [],
+  lostFound: [],
+  polls: [],
   feedbackConfig: [],
   feedbackSubmissions: [],
   reviews: {}, // productId -> reviews array
@@ -158,6 +160,8 @@ const cacheKeys = {
   feedbackSubmissions: 'kwabz:feedbackSubmissions',
   gigs: 'kwabz:gigs',
   thrift: 'kwabz:thrift',
+  lostFound: 'kwabz:lostFound',
+  polls: 'kwabz:polls',
   fcmTokens: 'kwabz:fcmTokens',   // All push subscriber tokens
   reviews: (productId) => `kwabz:reviews:${productId}`
 };
@@ -179,6 +183,8 @@ async function setCacheValue(key, value, ttlSeconds = null) {
   else if (key === cacheKeys.feedbackSubmissions) cache.feedbackSubmissions = value;
   else if (key === cacheKeys.gigs) cache.gigs = value;
   else if (key === cacheKeys.thrift) cache.thrift = value;
+  else if (key === cacheKeys.lostFound) cache.lostFound = value;
+  else if (key === cacheKeys.polls) cache.polls = value;
   else if (key === cacheKeys.fcmTokens) cache.fcmTokens = value; // FCM tokens in memory
   else if (key.startsWith('kwabz:reviews:')) {
     const prodId = key.replace('kwabz:reviews:', '');
@@ -952,12 +958,17 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] Communications snapshot failed:', err.message);
     });
 
-  // 19. Live Thrift Items Listener (Campus Push)
+  // 19. Live Thrift Items Listener (Campus Push & Redis Hybrid Caching)
   let isInitialThrift = true;
   db.collection('thrift_items')
     .orderBy('created_at', 'desc')
     .limit(50)
     .onSnapshot(snapshot => {
+      try {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setCacheValue(cacheKeys.thrift, items);
+      } catch (_) {}
+
       if (isInitialThrift) { isInitialThrift = false; return; }
       snapshot.docChanges().forEach(change => {
         if (change.type === 'added') {
@@ -978,12 +989,17 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] thrift_items snapshot failed:', err.message);
     });
 
-  // 20. Live Lost & Found Listener (Campus Push)
+  // 20. Live Lost & Found Listener (Campus Push & Redis Hybrid Caching)
   let isInitialLostFound = true;
   db.collection('lost_found')
     .orderBy('created_at', 'desc')
     .limit(50)
     .onSnapshot(snapshot => {
+      try {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setCacheValue(cacheKeys.lostFound, items);
+      } catch (_) {}
+
       if (isInitialLostFound) { isInitialLostFound = false; return; }
       snapshot.docChanges().forEach(change => {
         if (change.type === 'added') {
@@ -1003,12 +1019,17 @@ function setupBackgroundSync() {
       console.error('[Firestore Sync] lost_found snapshot failed:', err.message);
     });
 
-  // 21. Live Campus Polls Listener (Campus Push)
+  // 21. Live Campus Polls Listener (Campus Push & Redis Hybrid Caching)
   let isInitialPolls = true;
   db.collection('polls')
     .orderBy('created_at', 'desc')
     .limit(50)
     .onSnapshot(snapshot => {
+      try {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setCacheValue(cacheKeys.polls, items);
+      } catch (_) {}
+
       if (isInitialPolls) { isInitialPolls = false; return; }
       snapshot.docChanges().forEach(change => {
         if (change.type === 'added') {
@@ -1855,14 +1876,14 @@ app.delete('/api/bundles/:id', async (req, res) => {
 
 // ─── Campus Thrift & Dashouts Endpoints ─────────────────────
 app.get('/api/thrift', async (req, res) => {
-  if (cache.thrift.length > 0) {
-    return res.json(cache.thrift);
-  }
+  const cached = await getCacheValue(cacheKeys.thrift, null);
+  if (cached && Array.isArray(cached) && cached.length > 0) return res.json(cached);
+  if (cache.thrift && cache.thrift.length > 0) return res.json(cache.thrift);
+
   if (!isFirebaseOnline || !db) return res.json([]);
   try {
-    const snap = await db.collection('thrift_items').get();
+    const snap = await db.collection('thrift_items').orderBy('created_at', 'desc').limit(50).get();
     const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    items.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     await setCacheValue(cacheKeys.thrift, items);
     res.json(items);
   } catch (err) {
@@ -1883,7 +1904,7 @@ app.post('/api/thrift', async (req, res) => {
       await db.collection('thrift_items').doc(docId).set(itemData, { merge: true });
     }
     const itemWithId = { id: docId, ...itemData };
-    const updated = [itemWithId, ...cache.thrift.filter(i => i.id !== docId)];
+    const updated = [itemWithId, ...(cache.thrift || []).filter(i => i.id !== docId)];
     updated.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     await setCacheValue(cacheKeys.thrift, updated);
     res.json(itemWithId);
@@ -1897,7 +1918,8 @@ app.put('/api/thrift/:id', async (req, res) => {
   try {
     await db.collection('thrift_items').doc(req.params.id).set(req.body, { merge: true });
     const itemWithId = { id: req.params.id, ...req.body };
-    const updated = cache.thrift.map(i => i.id === req.params.id ? { ...i, ...req.body } : i);
+    const current = cache.thrift || [];
+    const updated = current.map(i => i.id === req.params.id ? { ...i, ...req.body } : i);
     if (!updated.some(i => i.id === req.params.id)) updated.unshift(itemWithId);
     updated.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     await setCacheValue(cacheKeys.thrift, updated);
@@ -1911,7 +1933,7 @@ app.delete('/api/thrift/:id', async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('thrift_items').doc(req.params.id).delete();
-    const updated = cache.thrift.filter(i => i.id !== req.params.id);
+    const updated = (cache.thrift || []).filter(i => i.id !== req.params.id);
     await setCacheValue(cacheKeys.thrift, updated);
     res.json({ success: true, id: req.params.id });
   } catch (err) {
@@ -1921,14 +1943,14 @@ app.delete('/api/thrift/:id', async (req, res) => {
 
 // ─── Campus Lost & Found Endpoints ─────────────────────
 app.get('/api/lost-found', async (req, res) => {
-  if (cache.lostFound && cache.lostFound.length > 0) {
-    return res.json(cache.lostFound);
-  }
+  const cached = await getCacheValue(cacheKeys.lostFound, null);
+  if (cached && Array.isArray(cached) && cached.length > 0) return res.json(cached);
+  if (cache.lostFound && cache.lostFound.length > 0) return res.json(cache.lostFound);
+
   if (!isFirebaseOnline || !db) return res.json([]);
   try {
-    const snap = await db.collection('lost_found').get();
+    const snap = await db.collection('lost_found').orderBy('created_at', 'desc').limit(50).get();
     const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    items.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     if (cacheKeys.lostFound) await setCacheValue(cacheKeys.lostFound, items);
     res.json(items);
   } catch (err) {
@@ -1990,14 +2012,14 @@ app.delete('/api/lost-found/:id', async (req, res) => {
 
 // ─── Campus Pulse & Polls Endpoints ─────────────────────
 app.get('/api/pulse', async (req, res) => {
-  if (cache.polls && cache.polls.length > 0) {
-    return res.json(cache.polls);
-  }
+  const cached = await getCacheValue(cacheKeys.polls, null);
+  if (cached && Array.isArray(cached) && cached.length > 0) return res.json(cached);
+  if (cache.polls && cache.polls.length > 0) return res.json(cache.polls);
+
   if (!isFirebaseOnline || !db) return res.json([]);
   try {
-    const snap = await db.collection('polls').get();
+    const snap = await db.collection('polls').orderBy('created_at', 'desc').limit(50).get();
     const items = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    items.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     if (cacheKeys.polls) await setCacheValue(cacheKeys.polls, items);
     res.json(items);
   } catch (err) {
