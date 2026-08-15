@@ -2167,6 +2167,76 @@ app.delete('/api/feedback-submissions/:id', async (req, res) => {
   }
 });
 
+// ─── Student Financial Planner Redis & Firestore Hybrid System ─────────
+app.get('/api/finance/data', async (req, res) => {
+  const uid = req.query.uid;
+  if (!uid) return res.status(400).json({ error: 'User UID is required' });
+
+  const redisKey = `kwabz:finance:user:${uid}`;
+
+  // 1. Try Render Redis cache first (sub-millisecond latency)
+  if (isRedisOnline && redisClient) {
+    try {
+      const cached = await redisClient.get(redisKey);
+      if (cached) {
+        const parsed = typeof cached === 'string' ? JSON.parse(cached) : cached;
+        return res.json({ source: 'redis', data: parsed });
+      }
+    } catch (err) {
+      console.warn('[Finance] Redis get error:', err);
+    }
+  }
+
+  // 2. Fall back to Firestore if Redis miss
+  if (isFirebaseOnline && db) {
+    try {
+      const docSnap = await db.collection('users').doc(uid).collection('finance').doc('data').get();
+      if (docSnap.exists && docSnap.data() && docSnap.data().data) {
+        const financeData = docSnap.data().data;
+        
+        // Populate Redis cache for instant future loads
+        if (isRedisOnline && redisClient) {
+          redisClient.set(redisKey, JSON.stringify(financeData)).catch(() => {});
+        }
+        return res.json({ source: 'firestore', data: financeData });
+      }
+    } catch (err) {
+      console.warn('[Finance] Firestore fetch error:', err);
+    }
+  }
+
+  return res.json({ source: 'none', data: null });
+});
+
+app.post('/api/finance/data', async (req, res) => {
+  const { uid, data: financePayload } = req.body || {};
+  if (!uid || !financePayload) {
+    return res.status(400).json({ error: 'Both uid and data payload are required' });
+  }
+
+  const redisKey = `kwabz:finance:user:${uid}`;
+
+  try {
+    // 1. Write immediately to Render Redis Cache
+    if (isRedisOnline && redisClient) {
+      await redisClient.set(redisKey, JSON.stringify(financePayload));
+    }
+
+    // 2. Sync to Firestore in background
+    if (isFirebaseOnline && db) {
+      await db.collection('users').doc(uid).collection('finance').doc('data').set({
+        updated_at: new Date().toISOString(),
+        data: financePayload
+      }, { merge: true });
+    }
+
+    res.json({ success: true, source: 'redis_and_firestore' });
+  } catch (err) {
+    console.error('[Finance] Save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Gigs & Campus Opportunities Endpoints ────────────────────
 app.get('/api/gigs', (req, res) => {
   res.json(cache.gigs.length > 0 ? cache.gigs : []);
