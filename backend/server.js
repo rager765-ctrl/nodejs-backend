@@ -353,19 +353,37 @@ async function sendFCMPush(payload, targetRole = 'all') {
         }
       }
     } else {
-      // Treat targetRole as a specific UID string
-      // 1. Get tokens associated with this UID in fcm_tokens collection
-      const tokensSnap = await db.collection('fcm_tokens').where('uid', '==', targetRole).get();
-      tokensSnap.forEach(doc => {
-        const data = doc.data();
-        if (data.token) tokens.push(data.token);
-      });
+      // Treat targetRole as a specific UID, Seller ID, or Email string
+      // 1. Query fcm_tokens by uid
+      const uidSnap = await db.collection('fcm_tokens').where('uid', '==', targetRole).get().catch(() => null);
+      if (uidSnap && !uidSnap.empty) {
+        uidSnap.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
+      }
 
-      // 2. Fallback to user's nested fcmTokens array
-      const userDoc = await db.collection('users').doc(targetRole).get();
-      if (userDoc.exists) {
-        const data = userDoc.data();
-        if (data.fcmTokens && Array.isArray(data.fcmTokens)) tokens.push(...data.fcmTokens);
+      // 2. Query fcm_tokens by seller_id
+      const sellerSnap = await db.collection('fcm_tokens').where('seller_id', '==', targetRole).get().catch(() => null);
+      if (sellerSnap && !sellerSnap.empty) {
+        sellerSnap.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
+      }
+
+      // 3. Query fcm_tokens by seller_email
+      const emailSnap = await db.collection('fcm_tokens').where('seller_email', '==', targetRole).get().catch(() => null);
+      if (emailSnap && !emailSnap.empty) {
+        emailSnap.forEach(doc => { if (doc.data().token) tokens.push(doc.data().token); });
+      }
+
+      // 4. Check sellers collection for nested fcmTokens
+      const sellerDoc = await db.collection('sellers').doc(targetRole).get().catch(() => null);
+      if (sellerDoc && sellerDoc.exists) {
+        const sData = sellerDoc.data();
+        if (sData.fcmTokens && Array.isArray(sData.fcmTokens)) tokens.push(...sData.fcmTokens);
+      }
+
+      // 5. Check users collection for nested fcmTokens
+      const userDoc = await db.collection('users').doc(targetRole).get().catch(() => null);
+      if (userDoc && userDoc.exists) {
+        const uData = userDoc.data();
+        if (uData.fcmTokens && Array.isArray(uData.fcmTokens)) tokens.push(...uData.fcmTokens);
       }
     }
 
@@ -1315,7 +1333,7 @@ app.get('/api/visitors/detailed', async (req, res) => {
 
 // 7.7. FCM Token Registration Proxy
 app.post('/api/fcm/register', async (req, res) => {
-  const { token, uid, userAgent, deviceId } = req.body;
+  const { token, uid, userAgent, deviceId, seller_id, seller_email, role } = req.body;
   if (!token) {
     return res.status(400).json({ error: 'Token is required' });
   }
@@ -1329,16 +1347,26 @@ app.post('/api/fcm/register', async (req, res) => {
     }
 
     if (isFirebaseOnline && db) {
-      // 1. Save to fcm_tokens collection (guest or user)
+      // 1. Save to fcm_tokens collection (guest, user, or seller)
       await db.collection('fcm_tokens').doc(token).set({
         token,
         uid: uid || 'guest',
+        seller_id: seller_id || null,
+        seller_email: seller_email || null,
+        role: role || 'user',
         userAgent: userAgent || '',
         deviceId: deviceId || '',
         last_updated: FieldValue.serverTimestamp()
       }, { merge: true });
 
-      // 2. If user is logged in (has uid and not 'guest'), nest inside user doc
+      // 2. If seller_id is provided, nest token inside sellers doc
+      if (seller_id) {
+        await db.collection('sellers').doc(seller_id).set({
+          fcmTokens: FieldValue.arrayUnion(token)
+        }, { merge: true }).catch(() => {});
+      }
+
+      // 3. If user is logged in (has uid and not 'guest'), nest inside user doc
       if (uid && uid !== 'guest') {
         await db.collection('users').doc(uid).set({
           fcmTokens: FieldValue.arrayUnion(token)
