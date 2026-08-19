@@ -9,6 +9,7 @@ import https from 'https';
 import { Server } from 'socket.io';
 import fs from 'fs';
 import path from 'path';
+import { handleUssdRequest } from './backend/ussdEngine.js';
 
 // Load Config
 dotenv.config();
@@ -2472,6 +2473,36 @@ app.post('/api/upload', async (req, res) => {
   } catch (err) {
     console.error('[Cloudinary Proxy] Unexpected error:', err.message);
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── USSD Gateway Endpoint (Hubtel, Africa's Talking, Nalo & Web Simulator) ───
+app.all('/api/ussd', async (req, res) => {
+  try {
+    const payload = req.method === 'GET' ? (req.query || {}) : (req.body || {});
+    const storeContext = {
+      products: cache.products || [],
+      categories: cache.categories || [],
+      sellers: cache.sellers || [],
+      orders: cache.orders || [],
+      foodCategories: cache.foodCategories || [],
+      foodItems: cache.foodItems || []
+    };
+
+    const response = await handleUssdRequest(payload, storeContext);
+
+    // Hubtel / JSON format response requested
+    if (payload.Type || payload.Mobile || req.headers['content-type']?.includes('json') || req.headers['accept']?.includes('json')) {
+      return res.json(response);
+    }
+
+    // Standard Telco text/plain response format (CON/END)
+    res.set('Content-Type', 'text/plain');
+    return res.send(response.message || response.text || '');
+  } catch (err) {
+    console.error('❌ USSD Route Error:', err);
+    res.set('Content-Type', 'text/plain');
+    return res.send('END An error occurred. Please try dialing *920*88# again.');
   }
 });
 
