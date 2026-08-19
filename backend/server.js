@@ -9,7 +9,7 @@ import https from 'https';
 import { Server } from 'socket.io';
 import fs from 'fs';
 import path from 'path';
-import { handleUssdRequest } from './backend/ussdEngine.js';
+import { handleUssdRequest } from './ussdEngine.js';
 
 // Load Config
 dotenv.config();

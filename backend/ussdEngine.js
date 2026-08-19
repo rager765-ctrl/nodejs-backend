@@ -1,6 +1,6 @@
 /**
  * Kwabz Store Online — USSD Engine Module
- * Supports Hubtel, Africa's Talking, Nalo, and Web Simulator USSD payloads.
+ * Supports Arkesel, Hubtel, Africa's Talking, Nalo, and Web Simulator USSD payloads.
  */
 
 // In-memory session store (sessionId -> session state object)
