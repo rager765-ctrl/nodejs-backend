@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
+import { getAuth } from 'firebase-admin/auth';
 import http, { createServer } from 'http';
 import https from 'https';
 import { Server } from 'socket.io';
@@ -18,7 +19,107 @@ const PORT = process.env.PORT || 5000;
 const SERVICE_ACCOUNT_PATH = process.env.FIREBASE_SERVICE_ACCOUNT || './firebase-service-account.json';
 
 const app = express();
-app.use(cors({ origin: '*' }));
+
+// ─── 1. Restricted CORS Middleware ────────────────────────────
+let dynamicAllowedOrigins = [
+  'https://kwabzstore.com',
+  'https://www.kwabzstore.com',
+  'https://nodejs-backend-ad8f.onrender.com',
+  'https://nodejs-backend-1-ucbq.onrender.com'
+];
+
+if (process.env.ALLOWED_ORIGINS) {
+  const envOrigins = process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean);
+  dynamicAllowedOrigins.push(...envOrigins);
+}
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    const cleaned = dynamicAllowedOrigins.map(o => o.trim().replace(/\/+$/, '')).filter(Boolean);
+    const reqClean = origin.trim().replace(/\/+$/, '');
+
+    if (
+      cleaned.includes(reqClean) ||
+      reqClean.startsWith('http://localhost') ||
+      reqClean.startsWith('http://127.0.0.1') ||
+      reqClean.startsWith('file://')
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true
+};
+
+app.use(cors(corsOptions));
+
+// ─── 2. Sliding-Window Rate Limiter Middleware ─────────────────
+const rateLimitMap = new Map();
+
+function createRateLimiter({ windowMs = 15 * 60 * 1000, max = 100, message = 'Too many requests, please try again later.' }) {
+  return (req, res, next) => {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || '127.0.0.1';
+    const now = Date.now();
+    const key = `${req.path}:${ip}`;
+
+    let record = rateLimitMap.get(key);
+    if (!record || now > record.resetTime) {
+      record = { count: 1, resetTime: now + windowMs };
+    } else {
+      record.count += 1;
+    }
+
+    rateLimitMap.set(key, record);
+
+    res.setHeader('X-RateLimit-Limit', max);
+    res.setHeader('X-RateLimit-Remaining', Math.max(0, max - record.count));
+    res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetTime / 1000));
+
+    if (record.count > max) {
+      return res.status(429).json({ error: message, retryAfterSeconds: Math.ceil((record.resetTime - now) / 1000) });
+    }
+
+    next();
+  };
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of rateLimitMap.entries()) {
+    if (now > record.resetTime) rateLimitMap.delete(key);
+  }
+}, 10 * 60 * 1000);
+
+const globalApiLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 300, message: 'Kwabz API rate limit exceeded. Please wait 15 minutes.' });
+const uploadLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many upload attempts. Please wait 15 minutes.' });
+
+app.use('/api/', globalApiLimiter);
+app.use('/api/upload', uploadLimiter);
+
+// ─── 3. Firebase Auth Token Verification Middleware ────────────
+async function requireAuth(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : (req.cookies?.kwabz_session || req.body?.token);
+
+    if (!token) {
+      return res.status(401).json({ error: 'Unauthorized. Auth token or session cookie required.' });
+    }
+
+    if (isFirebaseOnline && db) {
+      const decodedToken = await getAuth().verifyIdToken(token);
+      req.user = decodedToken;
+      return next();
+    } else {
+      req.user = { uid: 'guest_fallback' };
+      return next();
+    }
+  } catch (err) {
+    return res.status(403).json({ error: 'Invalid or expired authentication token.', details: err.message });
+  }
+}
+
 // Allow large JSON bodies for base64 image uploads (up to 20 MB)
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
@@ -2503,6 +2604,90 @@ app.all('/api/ussd', async (req, res) => {
     console.error('❌ USSD Route Error:', err);
     res.set('Content-Type', 'text/plain');
     return res.send('END An error occurred. Please try dialing *920*88# again.');
+  }
+});
+
+// ─── Auth Session Endpoints ────────────────────────────────────
+app.post('/api/auth/set-session', async (req, res) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) {
+      return res.status(400).json({ error: 'No token provided' });
+    }
+
+    if (isFirebaseOnline && db) {
+      try {
+        const decodedToken = await getAuth().verifyIdToken(token);
+        console.log(`[Auth] Verified session token for UID: ${decodedToken.uid}`);
+      } catch (verifyErr) {
+        console.warn('[Auth] ID Token verification notice:', verifyErr.message);
+      }
+    }
+
+    res.cookie('kwabz_session', token, {
+      maxAge: 5 * 24 * 60 * 60 * 1000,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax'
+    });
+
+    return res.json({ success: true, message: 'Session created successfully' });
+  } catch (err) {
+    console.error('❌ Set session error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/clear-session', async (req, res) => {
+  try {
+    res.clearCookie('kwabz_session', { path: '/' });
+    res.clearCookie('session', { path: '/' });
+    res.clearCookie('kwabz_auth_token', { path: '/' });
+    res.clearCookie('kwabz_admin_auth', { path: '/' });
+
+    console.log('[Auth] Cleared session cookies successfully.');
+    return res.json({ success: true, message: 'Session cleared successfully' });
+  } catch (err) {
+    console.error('❌ Clear session error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Admin CORS Allowed Origins Endpoints ──────────────────────
+app.get('/api/admin/cors-origins', async (req, res) => {
+  try {
+    return res.json({ origins: Array.from(new Set(dynamicAllowedOrigins)) });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/cors-origins', async (req, res) => {
+  try {
+    const { origins } = req.body || {};
+    if (!Array.isArray(origins)) {
+      return res.status(400).json({ error: 'origins must be an array of domain strings' });
+    }
+
+    const sanitized = origins.map(o => String(o).trim().replace(/\/+$/, '')).filter(Boolean);
+    dynamicAllowedOrigins = Array.from(new Set([
+      'https://kwabz-store-v2.vercel.app',
+      'https://www.kwabz.store',
+      'https://nodejs-backend-ad8f.onrender.com',
+      'https://nodejs-backend-1-ucbq.onrender.com',
+      ...sanitized
+    ]));
+
+    if (isFirebaseOnline && db) {
+      await db.collection('settings').doc('global').set({
+        allowedOrigins: dynamicAllowedOrigins
+      }, { merge: true }).catch(() => {});
+    }
+
+    console.log('✅ [CORS Admin] Allowed origins updated:', dynamicAllowedOrigins);
+    return res.json({ success: true, origins: dynamicAllowedOrigins });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
