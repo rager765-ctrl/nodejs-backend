@@ -40,13 +40,15 @@ async function buildProductionAssets() {
         });
 
         if (minified.code) {
-          const dest = path.join(outputDir, file);
-          fs.writeFileSync(dest, minified.code, 'utf8');
+          // Write minified output to production_dist/ folder
+          const destDist = path.join(outputDir, file);
+          fs.writeFileSync(destDist, minified.code, 'utf8');
+
           const minifiedSize = Buffer.byteLength(minified.code, 'utf8');
           const savedBytes = originalSize - minifiedSize;
           totalSavedBytes += savedBytes;
 
-          console.log(`✅ [Terser] ${file} → ${dest} (${(originalSize / 1024).toFixed(1)} KB -> ${(minifiedSize / 1024).toFixed(1)} KB, Saved ${(savedBytes / 1024).toFixed(1)} KB | Console logs stripped)`);
+          console.log(`✅ [Terser] ${file} → ${destDist} (${(originalSize / 1024).toFixed(1)} KB -> ${(minifiedSize / 1024).toFixed(1)} KB, Saved ${(savedBytes / 1024).toFixed(1)} KB | Console logs stripped)`);
         }
       } catch (err) {
         console.error(`❌ [Terser Error] Failed to minify ${file}:`, err.message);
@@ -54,7 +56,7 @@ async function buildProductionAssets() {
     }
   }
 
-  console.log(`\n🎉 Terser Build Complete! Total saved: ${(totalSavedBytes / 1024).toFixed(1)} KB across production assets.`);
+  console.log(`\n🎉 Terser Build Complete! Total saved: ${(totalSavedBytes / 1024).toFixed(1)} KB in production_dist.`);
 }
 
 buildProductionAssets();
