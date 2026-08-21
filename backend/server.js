@@ -123,8 +123,7 @@ async function requireStrictAuth(req, res, next) {
         return res.status(403).json({ error: 'Invalid or expired authentication token.', details: tokenErr.message });
       }
     } else {
-      req.user = { uid: 'guest_fallback' };
-      return next();
+      return res.status(401).json({ error: 'Unauthorized. Auth token or session cookie required.' });
     }
   } catch (err) {
     return res.status(403).json({ error: 'Invalid or expired authentication token.', details: err.message });
