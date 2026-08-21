@@ -98,7 +98,7 @@ app.use('/api/', globalApiLimiter);
 app.use('/api/upload', uploadLimiter);
 
 // ─── 3. Firebase Auth Token Verification Middleware ────────────
-async function requireAuth(req, res, next) {
+async function requireStrictAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization || '';
     let token = authHeader.startsWith('Bearer ')
@@ -128,6 +128,37 @@ async function requireAuth(req, res, next) {
     }
   } catch (err) {
     return res.status(403).json({ error: 'Invalid or expired authentication token.', details: err.message });
+  }
+}
+
+async function requireAuth(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization || '';
+    let token = authHeader.startsWith('Bearer ')
+      ? authHeader.substring(7)
+      : (req.cookies?.kwabz_session || req.cookies?.kwabz_auth_token || req.body?.token || req.query?.token || req.headers['x-auth-token']);
+
+    if (!token) {
+      req.user = { uid: 'guest_' + (req.ip || 'anon') };
+      return next();
+    }
+
+    if (isFirebaseOnline && db) {
+      try {
+        const decodedToken = await getAuth().verifyIdToken(token);
+        req.user = decodedToken;
+        return next();
+      } catch (tokenErr) {
+        req.user = { uid: 'guest_fallback' };
+        return next();
+      }
+    } else {
+      req.user = { uid: 'guest_fallback' };
+      return next();
+    }
+  } catch (err) {
+    req.user = { uid: 'guest_fallback' };
+    return next();
   }
 }
 
@@ -1350,7 +1381,7 @@ app.get('/api/settings', (req, res) => {
   res.json(Object.keys(cache.settings).length > 0 ? cache.settings : mockData.settings);
 });
 
-app.post('/api/settings', async (req, res) => {
+app.post('/api/settings', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('settings').doc('global').set(req.body, { merge: true });
@@ -1660,7 +1691,7 @@ app.post('/api/orders', async (req, res) => {
 });
 
 // 8.5. Admin Order Deletion Proxy
-app.delete('/api/orders/:id', requireAuth, async (req, res) => {
+app.delete('/api/orders/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) {
     return res.status(503).json({ error: 'Database service is unavailable' });
   }
@@ -1688,7 +1719,7 @@ app.delete('/api/orders/:id', requireAuth, async (req, res) => {
 
 // 9. Admin Fetch Orders — served from in-memory cache (same as products/categories)
 // The live onSnapshot listener (setupBackgroundSync) keeps cache.orders fresh.
-app.get('/api/orders', requireAuth, (req, res) => {
+app.get('/api/orders', requireStrictAuth, (req, res) => {
   if (cache.orders.length > 0) {
     const limit = parseInt(req.query.limit) || 200;
     return res.json(cache.orders.slice(0, limit));
@@ -1832,7 +1863,7 @@ app.get('/api/food-categories', (req, res) => {
   res.json(cache.foodCategories.length > 0 ? cache.foodCategories : []);
 });
 
-app.post('/api/food-categories', async (req, res) => {
+app.post('/api/food-categories', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     const docRef = await db.collection('food_categories').add(req.body);
@@ -1842,7 +1873,7 @@ app.post('/api/food-categories', async (req, res) => {
   }
 });
 
-app.put('/api/food-categories/:id', async (req, res) => {
+app.put('/api/food-categories/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('food_categories').doc(req.params.id).set(req.body, { merge: true });
@@ -1852,7 +1883,7 @@ app.put('/api/food-categories/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/food-categories/:id', async (req, res) => {
+app.delete('/api/food-categories/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('food_categories').doc(req.params.id).delete();
@@ -1869,7 +1900,7 @@ app.get('/api/food-items', (req, res) => {
   res.json(cache.foodItems.length > 0 ? cache.foodItems : []);
 });
 
-app.post('/api/food-items', async (req, res) => {
+app.post('/api/food-items', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     const docRef = await db.collection('food_items').add(req.body);
@@ -1879,7 +1910,7 @@ app.post('/api/food-items', async (req, res) => {
   }
 });
 
-app.put('/api/food-items/:id', async (req, res) => {
+app.put('/api/food-items/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('food_items').doc(req.params.id).set(req.body, { merge: true });
@@ -1889,7 +1920,7 @@ app.put('/api/food-items/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/food-items/:id', async (req, res) => {
+app.delete('/api/food-items/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('food_items').doc(req.params.id).delete();
@@ -1968,7 +1999,7 @@ app.post('/api/bundles/clean-duplicates', async (req, res) => {
   }
 });
 
-app.post('/api/bundles', async (req, res) => {
+app.post('/api/bundles', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     const docRef = await db.collection('bundles').add(req.body);
@@ -1985,7 +2016,7 @@ app.post('/api/bundles', async (req, res) => {
   }
 });
 
-app.put('/api/bundles/:id', async (req, res) => {
+app.put('/api/bundles/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('bundles').doc(req.params.id).set(req.body, { merge: true });
@@ -2003,7 +2034,7 @@ app.put('/api/bundles/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/bundles/:id', async (req, res) => {
+app.delete('/api/bundles/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('bundles').doc(req.params.id).delete();
@@ -2033,7 +2064,7 @@ app.get('/api/thrift', async (req, res) => {
   }
 });
 
-app.post('/api/thrift', async (req, res) => {
+app.post('/api/thrift', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     const itemData = req.body;
@@ -2054,7 +2085,7 @@ app.post('/api/thrift', async (req, res) => {
   }
 });
 
-app.put('/api/thrift/:id', async (req, res) => {
+app.put('/api/thrift/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('thrift_items').doc(req.params.id).set(req.body, { merge: true });
@@ -2070,7 +2101,7 @@ app.put('/api/thrift/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/thrift/:id', async (req, res) => {
+app.delete('/api/thrift/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('thrift_items').doc(req.params.id).delete();
@@ -2100,7 +2131,7 @@ app.get('/api/lost-found', async (req, res) => {
   }
 });
 
-app.post('/api/lost-found', async (req, res) => {
+app.post('/api/lost-found', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     const itemData = req.body;
@@ -2122,7 +2153,7 @@ app.post('/api/lost-found', async (req, res) => {
   }
 });
 
-app.put('/api/lost-found/:id', async (req, res) => {
+app.put('/api/lost-found/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('lost_found').doc(req.params.id).set(req.body, { merge: true });
@@ -2138,7 +2169,7 @@ app.put('/api/lost-found/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/lost-found/:id', async (req, res) => {
+app.delete('/api/lost-found/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('lost_found').doc(req.params.id).delete();
@@ -2169,7 +2200,7 @@ app.get('/api/pulse', async (req, res) => {
   }
 });
 
-app.post('/api/pulse', async (req, res) => {
+app.post('/api/pulse', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     const itemData = req.body;
@@ -2191,7 +2222,7 @@ app.post('/api/pulse', async (req, res) => {
   }
 });
 
-app.delete('/api/pulse/:id', async (req, res) => {
+app.delete('/api/pulse/:id', requireStrictAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) return res.status(503).json({ error: 'Database service is unavailable' });
   try {
     await db.collection('polls').doc(req.params.id).delete();
@@ -2209,7 +2240,7 @@ app.get('/api/feedback-config', (req, res) => {
   res.json(cache.feedbackConfig.length > 0 ? cache.feedbackConfig : []);
 });
 
-app.post('/api/feedback-config', async (req, res) => {
+app.post('/api/feedback-config', requireStrictAuth, async (req, res) => {
   try {
     const { id, config } = req.body;
     if (!id) return res.status(400).json({ error: 'Missing form ID' });
@@ -2233,7 +2264,7 @@ app.post('/api/feedback-config', async (req, res) => {
   }
 });
 
-app.delete('/api/feedback-config/:id', async (req, res) => {
+app.delete('/api/feedback-config/:id', requireStrictAuth, async (req, res) => {
   try {
     const id = req.params.id;
     cache.feedbackConfig = cache.feedbackConfig.filter(c => c.id !== id);
@@ -2309,7 +2340,7 @@ app.delete('/api/feedback-submissions/:id', async (req, res) => {
 });
 
 // ─── Student Financial Planner Redis & Firestore Hybrid System ─────────
-app.get('/api/finance/data', async (req, res) => {
+app.get('/api/finance/data', requireStrictAuth, async (req, res) => {
   const uid = req.query.uid;
   if (!uid) return res.status(400).json({ error: 'User UID is required' });
 
@@ -2349,7 +2380,7 @@ app.get('/api/finance/data', async (req, res) => {
   return res.json({ source: 'none', data: null });
 });
 
-app.post('/api/finance/data', async (req, res) => {
+app.post('/api/finance/data', requireStrictAuth, async (req, res) => {
   const { uid, data: financePayload } = req.body || {};
   if (!uid || !financePayload) {
     return res.status(400).json({ error: 'Both uid and data payload are required' });
