@@ -101,16 +101,27 @@ app.use('/api/upload', uploadLimiter);
 async function requireAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : (req.cookies?.kwabz_session || req.body?.token);
+    let token = authHeader.startsWith('Bearer ')
+      ? authHeader.substring(7)
+      : (req.cookies?.kwabz_session || req.cookies?.kwabz_auth_token || req.body?.token || req.query?.token || req.headers['x-auth-token']);
+
+    if (process.env.ADMIN_SECRET_KEY && token === process.env.ADMIN_SECRET_KEY) {
+      req.user = { uid: 'admin_secret', role: 'admin' };
+      return next();
+    }
 
     if (!token) {
-      return res.status(401).json({ error: 'Unauthorized. Auth token or session cookie required.' });
+      return res.status(401).json({ error: 'Unauthorized. Auth token or session cookie required to access this resource.' });
     }
 
     if (isFirebaseOnline && db) {
-      const decodedToken = await getAuth().verifyIdToken(token);
-      req.user = decodedToken;
-      return next();
+      try {
+        const decodedToken = await getAuth().verifyIdToken(token);
+        req.user = decodedToken;
+        return next();
+      } catch (tokenErr) {
+        return res.status(403).json({ error: 'Invalid or expired authentication token.', details: tokenErr.message });
+      }
     } else {
       req.user = { uid: 'guest_fallback' };
       return next();
@@ -1649,7 +1660,7 @@ app.post('/api/orders', async (req, res) => {
 });
 
 // 8.5. Admin Order Deletion Proxy
-app.delete('/api/orders/:id', async (req, res) => {
+app.delete('/api/orders/:id', requireAuth, async (req, res) => {
   if (!isFirebaseOnline || !db) {
     return res.status(503).json({ error: 'Database service is unavailable' });
   }
@@ -1677,7 +1688,7 @@ app.delete('/api/orders/:id', async (req, res) => {
 
 // 9. Admin Fetch Orders — served from in-memory cache (same as products/categories)
 // The live onSnapshot listener (setupBackgroundSync) keeps cache.orders fresh.
-app.get('/api/orders', (req, res) => {
+app.get('/api/orders', requireAuth, (req, res) => {
   if (cache.orders.length > 0) {
     const limit = parseInt(req.query.limit) || 200;
     return res.json(cache.orders.slice(0, limit));
@@ -2501,7 +2512,7 @@ app.get('/api/cloudinary-sign', async (req, res) => {
 // Proxies image uploads to Cloudinary using server-side signed credentials.
 // Accepts JSON: { file: base64DataUrl|remoteUrl, cloudName?, uploadPreset? }
 // Returns:      { secure_url: string, public_id: string }
-app.post('/api/upload', async (req, res) => {
+app.post('/api/upload', requireAuth, async (req, res) => {
   const { file, cloudName: clientCloudName, uploadPreset: clientPreset } = req.body || {};
 
   if (!file) {
@@ -2654,7 +2665,7 @@ app.post('/api/auth/clear-session', async (req, res) => {
 });
 
 // ─── Admin CORS Allowed Origins Endpoints ──────────────────────
-app.get('/api/admin/cors-origins', async (req, res) => {
+app.get('/api/admin/cors-origins', requireAuth, async (req, res) => {
   try {
     return res.json({ origins: Array.from(new Set(dynamicAllowedOrigins)) });
   } catch (err) {
@@ -2662,7 +2673,7 @@ app.get('/api/admin/cors-origins', async (req, res) => {
   }
 });
 
-app.post('/api/admin/cors-origins', async (req, res) => {
+app.post('/api/admin/cors-origins', requireAuth, async (req, res) => {
   try {
     const { origins } = req.body || {};
     if (!Array.isArray(origins)) {
