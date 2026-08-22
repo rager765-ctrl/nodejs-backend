@@ -280,46 +280,70 @@ app.post('/api/notifications/order-update', async (req, res) => {
 
 async function getAllRegisteredUserEmails() {
   const emailSet = new Set([process.env.ADMIN_EMAIL || 'opoku3765@gmail.com']);
-  try {
-    const usersSnap = await db.collection('users').get();
-    usersSnap.forEach(doc => {
-      const data = doc.data();
-      const email = data.email || data.userEmail || data.customer_email;
-      if (email && typeof email === 'string' && email.includes('@')) {
-        emailSet.add(email.trim().toLowerCase());
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const addIfValid = (rawEmail) => {
+    if (rawEmail && typeof rawEmail === 'string') {
+      const cleaned = rawEmail.trim().toLowerCase();
+      if (emailRegex.test(cleaned)) {
+        emailSet.add(cleaned);
       }
-    });
+    }
+  };
+
+  // 1. Fetch ALL registered users directly from Firebase Authentication
+  try {
+    const auth = getAuth();
+    let nextPageToken;
+    do {
+      const listUsersResult = await auth.listUsers(1000, nextPageToken);
+      listUsersResult.users.forEach(userRecord => {
+        if (userRecord.email) addIfValid(userRecord.email);
+        if (userRecord.providerData && Array.isArray(userRecord.providerData)) {
+          userRecord.providerData.forEach(p => { if (p.email) addIfValid(p.email); });
+        }
+      });
+      nextPageToken = listUsersResult.pageToken;
+    } while (nextPageToken);
+    console.log(`[Broadcast] Firebase Auth users scanned. Current total: ${emailSet.size} email(s).`);
   } catch (e) {
-    console.warn('[Broadcast] Error reading users collection:', e.message);
+    console.warn('[Broadcast] Error listing Firebase Auth users:', e.message);
   }
 
-  try {
-    const sellersSnap = await db.collection('sellers').get();
-    sellersSnap.forEach(doc => {
-      const data = doc.data();
-      const email = data.email || data.seller_email;
-      if (email && typeof email === 'string' && email.includes('@')) {
-        emailSet.add(email.trim().toLowerCase());
-      }
-    });
-  } catch (e) {
-    console.warn('[Broadcast] Error reading sellers collection:', e.message);
+  // 2. Deep-scan Firestore collections for user emails
+  const collectionsToScan = [
+    'users', 'sellers', 'orders', 'fcm_tokens',
+    'feedback_submissions', 'support_chats', 'gigs',
+    'thrift_items', 'lost_found', 'communications'
+  ];
+
+  for (const colName of collectionsToScan) {
+    try {
+      if (!db) continue;
+      const snap = await db.collection(colName).get();
+      snap.forEach(doc => {
+        const data = doc.data();
+        function extractEmails(obj) {
+          if (!obj || typeof obj !== 'object') return;
+          for (const key of Object.keys(obj)) {
+            const val = obj[key];
+            if (typeof val === 'string' && val.includes('@') && val.includes('.')) {
+              addIfValid(val);
+            } else if (typeof val === 'object' && val !== null) {
+              extractEmails(val);
+            }
+          }
+        }
+        extractEmails(data);
+      });
+    } catch (e) {
+      console.warn(`[Broadcast] Error scanning ${colName} collection:`, e.message);
+    }
   }
 
-  try {
-    const ordersSnap = await db.collection('orders').limit(300).get();
-    ordersSnap.forEach(doc => {
-      const data = doc.data();
-      const email = data.customer_email || (data.customer && data.customer.email) || data.userEmail || data.email;
-      if (email && typeof email === 'string' && email.includes('@')) {
-        emailSet.add(email.trim().toLowerCase());
-      }
-    });
-  } catch (e) {
-    console.warn('[Broadcast] Error reading orders collection:', e.message);
-  }
-
-  return Array.from(emailSet);
+  const finalEmails = Array.from(emailSet);
+  console.log(`[Broadcast] Final unique user emails aggregated: ${finalEmails.length}`);
+  return finalEmails;
 }
 
 app.post('/api/notifications/platform-announcement', async (req, res) => {
