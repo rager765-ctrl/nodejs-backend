@@ -660,3 +660,79 @@ export async function sendAdminBundleOrderNotice({
   });
 }
 
+/**
+ * 12. Send Instant Wallet Top-Up Confirmation Email to User
+ */
+export async function sendUserWalletTopupNotice({
+  userEmail,
+  userName = 'Valued Customer',
+  amount,
+  reference,
+  paymentMethod = 'Paystack MoMo / Card',
+  newBalance
+}) {
+  if (!userEmail) {
+    console.error('[EmailServices] Cannot send wallet topup notice: missing userEmail');
+    return { success: false, error: 'Missing userEmail' };
+  }
+
+  const formattedAmount = Number(amount || 0).toFixed(2);
+  const formattedBalance = newBalance !== undefined && newBalance !== null ? Number(newBalance).toFixed(2) : null;
+  const dateStr = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Wallet Top-Up Successful</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; background-color: #F4F4F5; margin: 0; padding: 20px; color: #18181B;">
+      <div style="max-width: 580px; margin: 0 auto; background-color: #FFFFFF; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);">
+        ${getEmailHeaderHTML('Wallet Deposit Received', 'Payment Processed Successfully')}
+        
+        <div style="padding: 32px 24px;">
+          <p style="font-size: 15px; color: #18181B; margin-top: 0;">Hi <strong>${userName}</strong>,</p>
+          <p style="font-size: 14px; color: #52525B; line-height: 1.5;">Your deposit of <strong>GH₵ ${formattedAmount}</strong> via <strong>${paymentMethod}</strong> has been received and credited to your Kwabz Store Wallet.</p>
+          
+          <div style="background-color: #000000; color: #FFFFFF; border-radius: 12px; padding: 20px; margin: 24px 0; text-align: center;">
+            <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #A1A1AA; margin-bottom: 4px;">AMOUNT CREDITED</div>
+            <div style="font-size: 28px; font-weight: 900; color: #10B981;">+ GH₵ ${formattedAmount}</div>
+            ${formattedBalance ? `<div style="font-size: 13px; color: #E4E4E7; margin-top: 6px;">New Wallet Balance: <strong>GH₵ ${formattedBalance}</strong></div>` : ''}
+          </div>
+
+          <div style="background-color: #F4F4F5; border-radius: 10px; padding: 16px 20px; font-size: 13px; color: #52525B;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span>Reference Number:</span>
+              <strong style="color: #18181B; font-family: monospace;">${reference}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+              <span>Payment Method:</span>
+              <strong style="color: #18181B;">${paymentMethod}</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>Date & Time:</span>
+              <strong style="color: #18181B;">${dateStr}</strong>
+            </div>
+          </div>
+
+          <div style="text-align: center; margin-top: 32px;">
+            <a href="${STORE_URL}/account.html" style="display: inline-block; background-color: #000000; color: #FFFFFF; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700; font-size: 14px; letter-spacing: 0.3px;">View Wallet Account</a>
+          </div>
+        </div>
+
+        ${getEmailFooterHTML()}
+      </div>
+    </body>
+    </html>
+  `;
+
+  return await sendEmail({
+    to: userEmail,
+    subject: `💳 Kwabz Wallet Top-Up Successful (+GH₵ ${formattedAmount})`,
+    html
+  });
+}
+
+

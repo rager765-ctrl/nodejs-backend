@@ -22,7 +22,8 @@ import {
   sendLostFoundNotice,
   sendThriftItemNotice,
   sendProductAdNotice,
-  sendAdminBundleOrderNotice
+  sendAdminBundleOrderNotice,
+  sendUserWalletTopupNotice
 } from './emailServices.js';
 
 // Load Config
@@ -249,6 +250,187 @@ app.post('/api/notifications/bundle-order', async (req, res) => {
   } catch (err) {
     console.error('[API] Error sending admin bundle order email notice:', err);
     return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/wallet-topup', async (req, res) => {
+  try {
+    const { userEmail, userName, amount, reference, paymentMethod, newBalance } = req.body;
+    if (!userEmail || !amount) {
+      return res.status(400).json({ success: false, error: 'Missing userEmail or amount' });
+    }
+    const result = await sendUserWalletTopupNotice({
+      userEmail,
+      userName,
+      amount,
+      reference,
+      paymentMethod,
+      newBalance
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending user wallet topup email notice:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Paystack Live Server Integration & Verification ───
+app.get('/api/paystack/config', (req, res) => {
+  res.json({
+    publicKey: process.env.PAYSTACK_PUBLIC_KEY || 'pk_live_74379b21fefbe46f6dd755f0f0c0ead6f15e099'
+  });
+});
+
+app.post('/api/paystack/initialize', async (req, res) => {
+  try {
+    const { email, amount, userUid, userName, senderPhone } = req.body;
+    if (!email || !amount || amount <= 0) {
+      return res.status(400).json({ success: false, error: 'Valid email and amount are required' });
+    }
+
+    const reference = 'KWABZ_PAYSTACK_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+    const amountInPesewas = Math.round(parseFloat(amount) * 100);
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    const publicKey = process.env.PAYSTACK_PUBLIC_KEY || 'pk_live_74379b21fefbe46f6dd755f0f0c0ead6f15e099';
+
+    if (secretKey) {
+      const response = await fetch('https://api.paystack.co/transaction/initialize', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${secretKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          amount: amountInPesewas,
+          currency: 'GHS',
+          reference: reference,
+          metadata: {
+            custom_fields: [
+              { display_name: "Customer Name", variable_name: "customer_name", value: userName || 'Customer' },
+              { display_name: "Sender Phone", variable_name: "sender_phone", value: senderPhone || '' },
+              { display_name: "User UID", variable_name: "user_uid", value: userUid || '' },
+              { display_name: "Payment Type", variable_name: "payment_type", value: "wallet_topup" }
+            ]
+          }
+        })
+      });
+      const data = await response.json();
+      if (data.status && data.data) {
+        return res.json({
+          success: true,
+          access_code: data.data.access_code,
+          authorization_url: data.data.authorization_url,
+          reference: reference,
+          publicKey: publicKey
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      reference: reference,
+      amount: amount,
+      email: email,
+      publicKey: publicKey
+    });
+  } catch (err) {
+    console.error('[Paystack Init Error]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/paystack/verify', async (req, res) => {
+  try {
+    const { reference, userUid, userEmail, userName, amount } = req.body;
+    if (!reference || !userUid) {
+      return res.status(400).json({ success: false, error: 'Missing reference or userUid' });
+    }
+
+    // 1. Idempotency Check (prevent double credit)
+    const existingTx = await db.collection('wallet_transactions').where('reference', '==', reference).get();
+    if (!existingTx.empty) {
+      const existingDoc = existingTx.docs[0].data();
+      return res.json({
+        success: true,
+        alreadyProcessed: true,
+        amount: existingDoc.amount,
+        message: 'Transaction already processed'
+      });
+    }
+
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    let verifiedAmount = parseFloat(amount || 0);
+    let verifiedEmail = userEmail || '';
+
+    if (secretKey) {
+      const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+        headers: { 'Authorization': `Bearer ${secretKey}` }
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyData.status || verifyData.data.status !== 'success') {
+        return res.status(400).json({ success: false, error: 'Paystack payment verification failed or unconfirmed' });
+      }
+      verifiedAmount = parseFloat((verifyData.data.amount / 100).toFixed(2));
+      verifiedEmail = verifyData.data.customer?.email || userEmail || '';
+    }
+
+    if (!verifiedAmount || verifiedAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'Invalid verified payment amount' });
+    }
+
+    // 2. Perform Atomic Wallet Balance Credit via Admin SDK
+    const userRef = db.collection('users').doc(userUid);
+    await userRef.set({
+      wallet_balance: FieldValue.increment(verifiedAmount)
+    }, { merge: true });
+
+    const updatedUserDoc = await userRef.get();
+    const newBalance = updatedUserDoc.exists ? parseFloat(updatedUserDoc.data().wallet_balance || 0) : verifiedAmount;
+
+    // 3. Write Double-Entry Ledger (wallet_transactions + wallet_transactions_archive)
+    const docRef = db.collection('wallet_transactions').doc();
+    const archiveRef = db.collection('wallet_transactions_archive').doc(docRef.id);
+    const txData = {
+      user_uid: userUid,
+      user_email: verifiedEmail,
+      user_name: userName || verifiedEmail.split('@')[0] || 'Kwabz User',
+      amount: verifiedAmount,
+      type: 'topup',
+      payment_method: 'Paystack MoMo/Card',
+      status: 'completed',
+      reference: reference,
+      details: `Paystack Live MoMo/Card Top-Up (Ref: ${reference})`,
+      created_at: (new Date()).toISOString(),
+      updated_at: (new Date()).toISOString()
+    };
+
+    const batch = db.batch();
+    batch.set(docRef, txData);
+    batch.set(archiveRef, txData);
+    await batch.commit();
+
+    // 4. Dispatch Email Receipt Notice to User
+    if (verifiedEmail) {
+      sendUserWalletTopupNotice({
+        userEmail: verifiedEmail,
+        userName: userName || 'Customer',
+        amount: verifiedAmount,
+        reference: reference,
+        paymentMethod: 'Paystack MoMo / Card',
+        newBalance: newBalance
+      }).catch(e => console.warn('[Paystack Verify Email Error]', e));
+    }
+
+    return res.json({
+      success: true,
+      amount: verifiedAmount,
+      newBalance: newBalance,
+      reference: reference
+    });
+  } catch (err) {
+    console.error('[Paystack Verify Error]', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
