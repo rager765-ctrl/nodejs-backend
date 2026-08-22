@@ -290,6 +290,14 @@ app.post('/api/paystack/initialize', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Valid email and amount are required' });
     }
 
+    // Check if user's wallet is locked
+    if (userUid && db) {
+      const userSnap = await db.collection('users').doc(userUid).get();
+      if (userSnap.exists && userSnap.data().wallet_locked === true) {
+        return res.status(403).json({ success: false, error: '🔒 Your account wallet is locked by Admin. Top-ups and transactions are disabled.' });
+      }
+    }
+
     const reference = 'KWABZ_PAYSTACK_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
     const amountInPesewas = Math.round(parseFloat(amount) * 100);
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
@@ -351,6 +359,14 @@ app.post('/api/paystack/verify', async (req, res) => {
     const { reference, userUid, userEmail, userName, amount } = req.body;
     if (!reference || !userUid) {
       return res.status(400).json({ success: false, error: 'Missing reference or userUid' });
+    }
+
+    // Check if user's wallet is locked
+    if (userUid && db) {
+      const userSnap = await db.collection('users').doc(userUid).get();
+      if (userSnap.exists && userSnap.data().wallet_locked === true) {
+        return res.status(403).json({ success: false, error: '🔒 Account wallet is locked by Admin. Top-ups and transactions are disabled.' });
+      }
     }
 
     // 1. Idempotency Check (prevent double credit)
@@ -552,6 +568,14 @@ app.post('/api/paystack/transfer', async (req, res) => {
 
     if (!txId || !userUid || !amount || !recipientPhone || !momoProvider) {
       return res.status(400).json({ success: false, error: 'Missing required fields: txId, userUid, amount, recipientPhone, momoProvider' });
+    }
+
+    // Check if user's wallet is locked
+    if (userUid && db) {
+      const userSnap = await db.collection('users').doc(userUid).get();
+      if (userSnap.exists && userSnap.data().wallet_locked === true) {
+        return res.status(403).json({ success: false, error: '🔒 User wallet is locked by Admin. Payouts are disabled.' });
+      }
     }
 
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
