@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
@@ -431,6 +432,93 @@ app.post('/api/paystack/verify', async (req, res) => {
   } catch (err) {
     console.error('[Paystack Verify Error]', err);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/paystack/webhook', async (req, res) => {
+  try {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (secretKey && req.headers['x-paystack-signature']) {
+      const hash = crypto.createHmac('sha512', secretKey).update(JSON.stringify(req.body)).digest('hex');
+      const signature = req.headers['x-paystack-signature'];
+      if (hash !== signature) {
+        return res.status(401).send('Invalid signature');
+      }
+    }
+
+    const event = req.body;
+    if (event && event.event === 'charge.success') {
+      const data = event.data;
+      const reference = data.reference;
+      const amount = parseFloat((data.amount / 100).toFixed(2));
+      const userEmail = data.customer?.email || '';
+      
+      let userUid = null;
+      let userName = 'Customer';
+      if (data.metadata && data.metadata.custom_fields) {
+        const uidField = data.metadata.custom_fields.find(f => f.variable_name === 'user_uid' || f.variable_name === 'user_id');
+        if (uidField) userUid = uidField.value;
+        const nameField = data.metadata.custom_fields.find(f => f.variable_name === 'customer_name');
+        if (nameField) userName = nameField.value;
+      }
+
+      if (!userUid && userEmail) {
+        const uSnap = await db.collection('users').where('email', '==', userEmail).limit(1).get();
+        if (!uSnap.empty) {
+          userUid = uSnap.docs[0].id;
+        }
+      }
+
+      if (userUid && reference && amount > 0) {
+        const existingTx = await db.collection('wallet_transactions').where('reference', '==', reference).get();
+        if (existingTx.empty) {
+          const userRef = db.collection('users').doc(userUid);
+          await userRef.set({
+            wallet_balance: FieldValue.increment(amount)
+          }, { merge: true });
+
+          const updatedDoc = await userRef.get();
+          const newBalance = updatedDoc.exists ? parseFloat(updatedDoc.data().wallet_balance || 0) : amount;
+
+          const docRef = db.collection('wallet_transactions').doc();
+          const archiveRef = db.collection('wallet_transactions_archive').doc(docRef.id);
+          const txData = {
+            user_uid: userUid,
+            user_email: userEmail,
+            user_name: userName,
+            amount: amount,
+            type: 'topup',
+            payment_method: 'Paystack MoMo/Card',
+            status: 'completed',
+            reference: reference,
+            details: `Paystack Webhook Deposit (Ref: ${reference})`,
+            created_at: (new Date()).toISOString(),
+            updated_at: (new Date()).toISOString()
+          };
+
+          const batch = db.batch();
+          batch.set(docRef, txData);
+          batch.set(archiveRef, txData);
+          await batch.commit();
+
+          if (userEmail) {
+            sendUserWalletTopupNotice({
+              userEmail: userEmail,
+              userName: userName,
+              amount: amount,
+              reference: reference,
+              paymentMethod: 'Paystack MoMo / Card',
+              newBalance: newBalance
+            }).catch(e => console.warn('[Paystack Webhook Email Warning]', e));
+          }
+        }
+      }
+    }
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('[Paystack Webhook Error]', err);
+    res.sendStatus(200);
   }
 });
 
