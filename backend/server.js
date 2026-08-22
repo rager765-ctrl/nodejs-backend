@@ -20,7 +20,8 @@ import {
   sendGigOpportunityNotice,
   sendBlogJournalNotice,
   sendLostFoundNotice,
-  sendThriftItemNotice
+  sendThriftItemNotice,
+  sendProductAdNotice
 } from './emailServices.js';
 
 // Load Config
@@ -232,7 +233,36 @@ app.post('/api/notifications/seller-order', async (req, res) => {
 
 app.post('/api/notifications/order-update', async (req, res) => {
   try {
-    const { customerEmail, customerName, orderId, newStatus, statusNotes, totalAmount } = req.body;
+    let { customerEmail, customerName, orderId, newStatus, statusNotes, totalAmount } = req.body;
+    
+    // DB lookup fallback if customerEmail is missing or set to admin email
+    const adminEmail = process.env.ADMIN_EMAIL || 'opoku3765@gmail.com';
+    if (!customerEmail || customerEmail === adminEmail) {
+      try {
+        if (orderId) {
+          const orderDoc = await db.collection('orders').doc(orderId).get();
+          if (orderDoc.exists) {
+            const oData = orderDoc.data();
+            const foundEmail = oData.customer_email || (oData.customer && oData.customer.email) || oData.userEmail || oData.user_email || oData.email;
+            if (foundEmail && foundEmail.includes('@') && foundEmail !== adminEmail) {
+              customerEmail = foundEmail;
+            } else if (oData.customer_uid || oData.uid) {
+              const userDoc = await db.collection('users').doc(oData.customer_uid || oData.uid).get();
+              if (userDoc.exists && userDoc.data()?.email) {
+                customerEmail = userDoc.data().email;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[API] Order update DB email lookup warning:', e.message);
+      }
+    }
+
+    if (!customerEmail) {
+      customerEmail = adminEmail;
+    }
+
     const result = await sendUserOrderUpdateNotice({
       customerEmail,
       customerName,
@@ -321,13 +351,15 @@ app.post('/api/notifications/platform-announcement', async (req, res) => {
 app.post('/api/notifications/gig-opportunity', async (req, res) => {
   try {
     const { submitterName, submitterEmail, gigTitle, gigCategory, budget, description } = req.body;
+    const recipients = await getAllRegisteredUserEmails();
     const result = await sendGigOpportunityNotice({
       submitterName,
       submitterEmail,
       gigTitle,
       gigCategory,
       budget,
-      description
+      description,
+      recipients
     });
     return res.json(result);
   } catch (err) {
@@ -339,12 +371,14 @@ app.post('/api/notifications/gig-opportunity', async (req, res) => {
 app.post('/api/notifications/blog-journal', async (req, res) => {
   try {
     const { title, author, category, excerpt, postUrl } = req.body;
+    const recipients = await getAllRegisteredUserEmails();
     const result = await sendBlogJournalNotice({
       title,
       author,
       category,
       excerpt,
-      postUrl
+      postUrl,
+      recipients
     });
     return res.json(result);
   } catch (err) {
@@ -356,6 +390,7 @@ app.post('/api/notifications/blog-journal', async (req, res) => {
 app.post('/api/notifications/lost-found', async (req, res) => {
   try {
     const { reporterName, reporterEmail, reporterPhone, itemType, itemName, location, description } = req.body;
+    const recipients = await getAllRegisteredUserEmails();
     const result = await sendLostFoundNotice({
       reporterName,
       reporterEmail,
@@ -363,7 +398,8 @@ app.post('/api/notifications/lost-found', async (req, res) => {
       itemType,
       itemName,
       location,
-      description
+      description,
+      recipients
     });
     return res.json(result);
   } catch (err) {
@@ -375,6 +411,7 @@ app.post('/api/notifications/lost-found', async (req, res) => {
 app.post('/api/notifications/thrift-item', async (req, res) => {
   try {
     const { sellerName, sellerEmail, sellerPhone, itemTitle, price, location, condition } = req.body;
+    const recipients = await getAllRegisteredUserEmails();
     const result = await sendThriftItemNotice({
       sellerName,
       sellerEmail,
@@ -382,11 +419,50 @@ app.post('/api/notifications/thrift-item', async (req, res) => {
       itemTitle,
       price,
       location,
-      condition
+      condition,
+      recipients
     });
     return res.json(result);
   } catch (err) {
     console.error('[API] Error sending thrift item email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/product-ad-push', async (req, res) => {
+  try {
+    const { productIds, products: providedProducts, customTitle, customMessage } = req.body;
+    
+    let targetProducts = [];
+    if (Array.isArray(providedProducts) && providedProducts.length > 0) {
+      targetProducts = providedProducts;
+    } else if (Array.isArray(productIds) && productIds.length > 0) {
+      const allProds = cache.products || [];
+      targetProducts = allProds.filter(p => productIds.includes(p.id));
+      if (targetProducts.length === 0 && db) {
+        // Fallback: fetch directly from Firestore if not in cache
+        const pSnap = await db.collection('products').where('__name__', 'in', productIds.slice(0, 10)).get();
+        pSnap.forEach(doc => targetProducts.push({ id: doc.id, ...doc.data() }));
+      }
+    }
+
+    if (targetProducts.length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid products selected for email ad push.' });
+    }
+
+    const recipients = await getAllRegisteredUserEmails();
+    console.log(`[API] Product Ad Push dispatching ${targetProducts.length} product(s) to ${recipients.length} live registered email(s) from DB.`);
+
+    const result = await sendProductAdNotice({
+      products: targetProducts,
+      customTitle,
+      customMessage,
+      recipients
+    });
+
+    return res.json({ ...result, recipientCount: recipients.length, productCount: targetProducts.length });
+  } catch (err) {
+    console.error('[API] Error sending product ad push email:', err);
     return res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -994,6 +1070,31 @@ function setupBackgroundSync() {
                  }
                }, order.seller_id);
              }
+
+             // Dispatch Order Update Email to Customer's Real Email
+             (async () => {
+               try {
+                 let custEmail = order.customer_email || (order.customer && order.customer.email) || order.userEmail || order.user_email || order.email;
+                 if (!custEmail && customerUid) {
+                   const userDoc = await db.collection('users').doc(customerUid).get();
+                   if (userDoc.exists && userDoc.data()?.email) {
+                     custEmail = userDoc.data().email;
+                   }
+                 }
+                 if (custEmail && custEmail.includes('@')) {
+                   await sendUserOrderUpdateNotice({
+                     customerEmail: custEmail,
+                     customerName: (order.customer && order.customer.name) || order.customer_name || order.name || 'Valued Customer',
+                     orderId: displayOrderNum,
+                     newStatus: order.status,
+                     totalAmount: order.total_price || order.total_amount || order.total || 0
+                   });
+                   console.log(`[Firestore Sync] Sent order update email for ${displayOrderNum} to customer: ${custEmail}`);
+                 }
+               } catch (emailErr) {
+                 console.error('[Firestore Sync] Order update email error:', emailErr);
+               }
+             })();
           }
         }
         else if (change.type === 'removed') {
@@ -1138,19 +1239,23 @@ function setupBackgroundSync() {
             }
           }, 'all');
 
-          // Trigger Resend Email Push Announcement
-          try {
-            sendPlatformAnnouncement({
-              recipients: [process.env.ADMIN_EMAIL || 'opoku3765@gmail.com'],
-              subject: 'Platform Announcement: New Kwabz Store App Update Available',
-              title: 'App Update Available',
-              message: '<p style="font-size: 15px; color: #18181B; line-height: 1.6;">A fresh update has been deployed on <strong>Kwabz Store</strong>. Please open the app or refresh your browser to install the latest features, performance boosts, and bug fixes.</p>',
-              actionUrl: process.env.STORE_URL || 'https://kwabz.store',
-              actionText: 'Update App Now'
-            }).catch(e => console.error('[Firestore Sync] App Update Email Push Error:', e));
-          } catch (emailErr) {
-            console.error('[Firestore Sync] App Update Email Push Exception:', emailErr);
-          }
+          // Trigger Resend Email Push Announcement to ALL live users in DB
+          (async () => {
+            try {
+              const allEmails = await getAllRegisteredUserEmails();
+              await sendPlatformAnnouncement({
+                recipients: allEmails,
+                subject: 'Platform Announcement: New Kwabz Store App Update Available',
+                title: 'App Update Available',
+                message: '<p style="font-size: 15px; color: #18181B; line-height: 1.6;">A fresh update has been deployed on <strong>Kwabz Store</strong>. Please open the app or refresh your browser to install the latest features, performance boosts, and bug fixes.</p>',
+                actionUrl: process.env.STORE_URL || 'https://kwabz.store',
+                actionText: 'Update App Now'
+              });
+              console.log(`[Firestore Sync] App Update Email Push sent to ${allEmails.length} user(s).`);
+            } catch (emailErr) {
+              console.error('[Firestore Sync] App Update Email Push Exception:', emailErr);
+            }
+          })();
         }
       }
     }, err => {

@@ -323,9 +323,12 @@ export async function sendGigOpportunityNotice({
   gigCategory = 'General',
   budget,
   description,
+  recipients,
   adminEmail = ADMIN_EMAIL
 }) {
-  const targetRecipients = Array.from(new Set([adminEmail, submitterEmail].filter(Boolean)));
+  const targetRecipients = (recipients && recipients.length > 0)
+    ? recipients
+    : Array.from(new Set([adminEmail, submitterEmail].filter(Boolean)));
   const html = `
     <!DOCTYPE html>
     <html>
@@ -371,8 +374,11 @@ export async function sendBlogJournalNotice({
   category = 'Campus Journal',
   excerpt,
   postUrl = `${STORE_URL}/blog.html`,
+  recipients,
   adminEmail = ADMIN_EMAIL
 }) {
+  const targetRecipients = (recipients && recipients.length > 0) ? recipients : adminEmail;
+
   const html = `
     <!DOCTYPE html>
     <html>
@@ -400,7 +406,7 @@ export async function sendBlogJournalNotice({
   `;
 
   return await sendEmail({
-    to: adminEmail,
+    to: targetRecipients,
     subject: `New Journal Article: ${title}`,
     html
   });
@@ -417,9 +423,12 @@ export async function sendLostFoundNotice({
   itemName,
   location = 'Campus',
   description,
+  recipients,
   adminEmail = ADMIN_EMAIL
 }) {
-  const targetRecipients = Array.from(new Set([adminEmail, reporterEmail].filter(Boolean)));
+  const targetRecipients = (recipients && recipients.length > 0)
+    ? recipients
+    : Array.from(new Set([adminEmail, reporterEmail].filter(Boolean)));
   const typeLabel = (itemType || 'Lost').toUpperCase();
 
   const html = `
@@ -470,9 +479,12 @@ export async function sendThriftItemNotice({
   price,
   location = 'Campus',
   condition = 'Pre-owned',
+  recipients,
   adminEmail = ADMIN_EMAIL
 }) {
-  const targetRecipients = Array.from(new Set([adminEmail, sellerEmail].filter(Boolean)));
+  const targetRecipients = (recipients && recipients.length > 0)
+    ? recipients
+    : Array.from(new Set([adminEmail, sellerEmail].filter(Boolean)));
 
   const html = `
     <!DOCTYPE html>
@@ -509,3 +521,73 @@ export async function sendThriftItemNotice({
     html
   });
 }
+
+/**
+ * 9. Send Selected Products Email Push Advertisement
+ */
+export async function sendProductAdNotice({
+  products = [],
+  customTitle,
+  customMessage,
+  recipients,
+  adminEmail = ADMIN_EMAIL
+}) {
+  const targetRecipients = (recipients && recipients.length > 0)
+    ? recipients
+    : [adminEmail];
+
+  const firstProd = products[0] || {};
+  const mainTitle = customTitle || (products.length === 1 ? `🔥 Product Promo: ${firstProd.name || 'Featured Item'}` : `🛒 Product Spotlight: ${products.length} Featured Items!`);
+  const cleanSubject = mainTitle.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
+
+  const productCardsHTML = products.map(p => {
+    const discountedPrice = (p.discount && p.discount > 0) ? (p.price * (1 - p.discount / 100)) : p.price;
+    const priceStr = `GH₵ ${Number(discountedPrice || 0).toFixed(2)}`;
+    const originalPriceStr = (p.discount && p.discount > 0) ? `<span style="text-decoration: line-through; color: #A1A1AA; font-size: 13px; margin-left: 6px;">GH₵ ${Number(p.price).toFixed(2)}</span>` : '';
+    const prodUrl = `${STORE_URL}/product-detail.html?id=${p.id}`;
+
+    return `
+      <div style="background-color: #FAFAFA; border: 1px solid #E4E4E7; border-radius: 12px; padding: 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 16px;">
+        ${p.image_url ? `
+          <img src="${p.image_url}" alt="${p.name}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px; flex-shrink: 0; background: #E4E4E7;" />
+        ` : ''}
+        <div style="flex: 1; min-width: 0;">
+          <h4 style="margin: 0 0 4px 0; font-size: 15px; font-weight: 700; color: #18181B; font-family: sans-serif;">${p.name}</h4>
+          <p style="margin: 0 0 8px 0; font-size: 15px; font-weight: 800; color: #000000;">${priceStr} ${originalPriceStr}</p>
+          <a href="${prodUrl}" style="display: inline-block; background-color: #000000; color: #FFFFFF; text-decoration: none; padding: 6px 14px; border-radius: 6px; font-weight: 700; font-size: 12px;">Shop Now →</a>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${cleanSubject}</title>
+    </head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F4F5; margin: 0; padding: 24px 12px; color: #18181B;">
+      <div style="max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06); border: 1px solid #E4E4E7;">
+        ${getEmailHeaderHTML(mainTitle, 'Featured Product Announcement')}
+        <div style="padding: 32px 24px;">
+          ${customMessage ? `<div style="font-size: 14px; color: #27272A; line-height: 1.6; margin-bottom: 24px; background: #F4F4F5; border-left: 3px solid #000; padding: 12px 16px; border-radius: 6px;">${customMessage}</div>` : ''}
+          ${productCardsHTML}
+          <div style="text-align: center; margin-top: 32px;">
+            <a href="${STORE_URL}/shop.html" style="display: inline-block; background-color: #000000; color: #FFFFFF; text-decoration: none; padding: 14px 36px; border-radius: 8px; font-weight: 700; font-size: 14px;">Browse Full Kwabz Store Catalog</a>
+          </div>
+        </div>
+        ${getEmailFooterHTML()}
+      </div>
+    </body>
+    </html>
+  `;
+
+  return await sendEmail({
+    to: targetRecipients,
+    subject: cleanSubject,
+    html
+  });
+}
+
