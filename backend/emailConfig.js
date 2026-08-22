@@ -53,6 +53,17 @@ export async function sendEmail({ to, subject, html, text, from = DEFAULT_FROM_E
 
     const response = await resend.emails.send(payload);
     if (response.error) {
+      // Auto-fallback if kwabz.store domain is not verified yet on Resend Dashboard
+      if (response.error.statusCode === 403 && response.error.message?.includes('not verified') && from !== 'Kwabz Store <onboarding@resend.dev>') {
+        console.warn('[Resend] ⚠️ Custom domain sender unverified on Resend. Auto-retrying with onboarding@resend.dev...');
+        payload.from = 'Kwabz Store <onboarding@resend.dev>';
+        const retryResponse = await resend.emails.send(payload);
+        if (!retryResponse.error) {
+          console.log('[Resend] 📧 Fallback Email sent successfully! ID:', retryResponse.data?.id);
+          return { success: true, data: retryResponse.data, usedFallback: true };
+        }
+      }
+
       console.error('[Resend] ❌ Error response from Resend API:', response.error);
       return { success: false, error: response.error };
     }
