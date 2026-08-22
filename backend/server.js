@@ -527,6 +527,130 @@ app.post('/api/paystack/webhook', async (req, res) => {
   }
 });
 
+// ─── Paystack Transfer (Admin Withdrawal Payout) ───────────────────────────
+// Ghana MoMo bank codes for Paystack
+const GHANA_MOMO_CODES = {
+  mtn: 'MTN',
+  telecel: 'VDF',
+  vodafone: 'VDF',
+  airteltigo: 'ATL',
+  tigo: 'ATL',
+  airtel: 'ATL'
+};
+
+app.post('/api/paystack/transfer', async (req, res) => {
+  try {
+    const { txId, userUid, amount, recipientPhone, recipientName, momoProvider } = req.body;
+
+    if (!txId || !userUid || !amount || !recipientPhone || !momoProvider) {
+      return res.status(400).json({ success: false, error: 'Missing required fields: txId, userUid, amount, recipientPhone, momoProvider' });
+    }
+
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey || secretKey.startsWith('sk_test_')) {
+      // Allow test mode with a mock success
+      if (secretKey && secretKey.startsWith('sk_test_')) {
+        return res.json({ success: true, mock: true, message: 'Test mode — no real transfer made' });
+      }
+      return res.status(500).json({ success: false, error: 'Live Paystack secret key not configured' });
+    }
+
+    const bankCode = GHANA_MOMO_CODES[momoProvider.toLowerCase()] || momoProvider.toUpperCase();
+    const amountPesewas = Math.round(parseFloat(amount) * 100);
+
+    // Step 1: Create a transfer recipient
+    const recipientRes = await fetch('https://api.paystack.co/transferrecipient', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        type: 'mobile_money',
+        name: recipientName || 'Kwabz User',
+        account_number: recipientPhone.replace(/^0/, '233').replace(/^\+/, ''),
+        bank_code: bankCode,
+        currency: 'GHS',
+        country: 'GH'
+      })
+    });
+    const recipientData = await recipientRes.json();
+    if (!recipientData.status || !recipientData.data?.recipient_code) {
+      console.error('[Paystack Transfer] Recipient creation failed:', recipientData);
+      return res.status(400).json({ success: false, error: recipientData.message || 'Failed to create transfer recipient' });
+    }
+    const recipientCode = recipientData.data.recipient_code;
+
+    // Step 2: Initiate transfer
+    const reference = `KWABZ_PAYOUT_${txId}_${Date.now()}`;
+    const transferRes = await fetch('https://api.paystack.co/transfer', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        source: 'balance',
+        amount: amountPesewas,
+        recipient: recipientCode,
+        reason: `Kwabz Wallet Withdrawal - ${txId}`,
+        currency: 'GHS',
+        reference: reference
+      })
+    });
+    const transferData = await transferRes.json();
+    if (!transferData.status) {
+      console.error('[Paystack Transfer] Transfer initiation failed:', transferData);
+      return res.status(400).json({ success: false, error: transferData.message || 'Transfer initiation failed' });
+    }
+
+    const transferStatus = transferData.data?.status; // 'success', 'pending', 'otp'
+
+    // Step 3: Update Firestore — deduct balance and mark tx completed
+    if (admin) {
+      const db = admin.firestore();
+      const userRef = db.collection('users').doc(userUid);
+      const txRef = db.collection('wallet_transactions').doc(txId);
+      const archiveRef = db.collection('wallet_transactions_archive').doc(txId);
+
+      const batch = db.batch();
+      batch.update(txRef, {
+        status: 'completed',
+        payout_reference: reference,
+        payout_transfer_code: transferData.data?.transfer_code || '',
+        payout_status: transferStatus,
+        updated_at: new Date().toISOString()
+      });
+      batch.set(archiveRef, {
+        status: 'completed',
+        payout_reference: reference,
+        payout_transfer_code: transferData.data?.transfer_code || '',
+        payout_status: transferStatus,
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+      // Atomic deduction using FieldValue
+      batch.update(userRef, {
+        wallet_balance: admin.firestore.FieldValue.increment(-parseFloat(amount))
+      });
+      await batch.commit();
+    }
+
+    console.log(`[Paystack Transfer] GH₵${amount} → ${recipientPhone} (${momoProvider}) | Status: ${transferStatus}`);
+    return res.json({
+      success: true,
+      transferStatus,
+      reference,
+      message: transferStatus === 'success'
+        ? `GH₵${amount} successfully sent to ${recipientPhone}`
+        : `Transfer initiated — status: ${transferStatus}`
+    });
+
+  } catch (err) {
+    console.error('[Paystack Transfer Error]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/notifications/order-update', async (req, res) => {
   try {
     let { customerEmail, customerName, orderId, newStatus, statusNotes, totalAmount } = req.body;
