@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "node build.js",
     "bot": "cd kwabz-whatsapp-bot && npm start"
   },
   "dependencies": {
@@ -14,9 +13,7 @@
     "firebase-admin": "^14.0.0",
     "jsdom": "^29.1.1",
     "puppeteer": "^25.1.0",
+    "resend": "^4.8.0",
     "socket.io": "^4.8.3"
-  },
-  "devDependencies": {
-    "terser": "^5.50.0"
   }
 }

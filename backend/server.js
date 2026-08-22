@@ -22,6 +22,8 @@ const app = express();
 
 // ─── 1. Restricted CORS Middleware ────────────────────────────
 let dynamicAllowedOrigins = [
+  'https://kwabz.store',
+  'https://www.kwabz.store',
   'https://kwabzstore.com',
   'https://www.kwabzstore.com',
   'https://nodejs-backend-ad8f.onrender.com',
