@@ -248,9 +248,60 @@ app.post('/api/notifications/order-update', async (req, res) => {
   }
 });
 
+async function getAllRegisteredUserEmails() {
+  const emailSet = new Set([process.env.ADMIN_EMAIL || 'opoku3765@gmail.com']);
+  try {
+    const usersSnap = await db.collection('users').get();
+    usersSnap.forEach(doc => {
+      const data = doc.data();
+      const email = data.email || data.userEmail || data.customer_email;
+      if (email && typeof email === 'string' && email.includes('@')) {
+        emailSet.add(email.trim().toLowerCase());
+      }
+    });
+  } catch (e) {
+    console.warn('[Broadcast] Error reading users collection:', e.message);
+  }
+
+  try {
+    const sellersSnap = await db.collection('sellers').get();
+    sellersSnap.forEach(doc => {
+      const data = doc.data();
+      const email = data.email || data.seller_email;
+      if (email && typeof email === 'string' && email.includes('@')) {
+        emailSet.add(email.trim().toLowerCase());
+      }
+    });
+  } catch (e) {
+    console.warn('[Broadcast] Error reading sellers collection:', e.message);
+  }
+
+  try {
+    const ordersSnap = await db.collection('orders').limit(300).get();
+    ordersSnap.forEach(doc => {
+      const data = doc.data();
+      const email = data.customer_email || (data.customer && data.customer.email) || data.userEmail || data.email;
+      if (email && typeof email === 'string' && email.includes('@')) {
+        emailSet.add(email.trim().toLowerCase());
+      }
+    });
+  } catch (e) {
+    console.warn('[Broadcast] Error reading orders collection:', e.message);
+  }
+
+  return Array.from(emailSet);
+}
+
 app.post('/api/notifications/platform-announcement', async (req, res) => {
   try {
-    const { recipients, subject, title, message, actionUrl, actionText, bannerImageUrl } = req.body;
+    let { recipients, subject, title, message, actionUrl, actionText, bannerImageUrl } = req.body;
+    
+    // If recipients is 'all', not provided, or only has 1 recipient, query ALL live users in Firestore!
+    if (!recipients || recipients === 'all' || (Array.isArray(recipients) && recipients.length <= 1)) {
+      recipients = await getAllRegisteredUserEmails();
+      console.log(`[API] Platform Announcement dispatching to ${recipients.length} live registered email(s) from DB.`);
+    }
+
     const result = await sendPlatformAnnouncement({
       recipients,
       subject,
@@ -260,7 +311,7 @@ app.post('/api/notifications/platform-announcement', async (req, res) => {
       actionText,
       bannerImageUrl
     });
-    return res.json(result);
+    return res.json({ ...result, recipientCount: Array.isArray(recipients) ? recipients.length : 1 });
   } catch (err) {
     console.error('[API] Error sending platform announcement email:', err);
     return res.status(500).json({ success: false, error: err.message });
