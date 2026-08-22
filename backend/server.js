@@ -426,7 +426,7 @@ app.post('/api/paystack/verify', async (req, res) => {
       reference: reference,
       paystack_ref: reference,
       paystack_id: paystackTxId,
-      details: `Paystack Live MoMo/Card Top-Up (Kwabz ID: ${docRef.id} | Paystack Ref: ${reference}${paystackTxId ? ' | Paystack ID: ' + paystackTxId : ''})`,
+      details: 'Wallet Top-Up via Mobile Money / Card',
       created_at: (new Date()).toISOString(),
       updated_at: (new Date()).toISOString()
     };
@@ -520,7 +520,7 @@ app.post('/api/paystack/webhook', async (req, res) => {
             reference: reference,
             paystack_ref: reference,
             paystack_id: paystackTxId,
-            details: `Paystack Webhook Deposit (Kwabz ID: ${docRef.id} | Paystack Ref: ${reference}${paystackTxId ? ' | Paystack ID: ' + paystackTxId : ''})`,
+            details: 'Wallet Deposit via Mobile Money',
             created_at: (new Date()).toISOString(),
             updated_at: (new Date()).toISOString()
           };
