@@ -394,10 +394,12 @@ app.post('/api/paystack/verify', async (req, res) => {
     const updatedUserDoc = await userRef.get();
     const newBalance = updatedUserDoc.exists ? parseFloat(updatedUserDoc.data().wallet_balance || 0) : verifiedAmount;
 
-    // 3. Write Double-Entry Ledger (wallet_transactions + wallet_transactions_archive)
+    // 3. Write Double-Entry Immutable Ledger (wallet_transactions + wallet_transactions_archive)
     const docRef = db.collection('wallet_transactions').doc();
     const archiveRef = db.collection('wallet_transactions_archive').doc(docRef.id);
+    const paystackTxId = (verifyData && verifyData.data && verifyData.data.id) ? String(verifyData.data.id) : '';
     const txData = {
+      kwabz_tx_id: docRef.id,
       user_uid: userUid,
       user_email: verifiedEmail,
       user_name: userName || verifiedEmail.split('@')[0] || 'Kwabz User',
@@ -406,7 +408,9 @@ app.post('/api/paystack/verify', async (req, res) => {
       payment_method: 'Paystack MoMo/Card',
       status: 'completed',
       reference: reference,
-      details: `Paystack Live MoMo/Card Top-Up (Ref: ${reference})`,
+      paystack_ref: reference,
+      paystack_id: paystackTxId,
+      details: `Paystack Live MoMo/Card Top-Up (Kwabz ID: ${docRef.id} | Paystack Ref: ${reference}${paystackTxId ? ' | Paystack ID: ' + paystackTxId : ''})`,
       created_at: (new Date()).toISOString(),
       updated_at: (new Date()).toISOString()
     };
@@ -487,7 +491,9 @@ app.post('/api/paystack/webhook', async (req, res) => {
 
           const docRef = db.collection('wallet_transactions').doc();
           const archiveRef = db.collection('wallet_transactions_archive').doc(docRef.id);
+          const paystackTxId = data.id ? String(data.id) : '';
           const txData = {
+            kwabz_tx_id: docRef.id,
             user_uid: userUid,
             user_email: userEmail,
             user_name: userName,
@@ -496,7 +502,9 @@ app.post('/api/paystack/webhook', async (req, res) => {
             payment_method: 'Paystack MoMo/Card',
             status: 'completed',
             reference: reference,
-            details: `Paystack Webhook Deposit (Ref: ${reference})`,
+            paystack_ref: reference,
+            paystack_id: paystackTxId,
+            details: `Paystack Webhook Deposit (Kwabz ID: ${docRef.id} | Paystack Ref: ${reference}${paystackTxId ? ' | Paystack ID: ' + paystackTxId : ''})`,
             created_at: (new Date()).toISOString(),
             updated_at: (new Date()).toISOString()
           };
