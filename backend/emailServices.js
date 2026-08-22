@@ -591,3 +591,72 @@ export async function sendProductAdNotice({
   });
 }
 
+/**
+ * 6. Send Admin Notification when a Data Bundle is Purchased
+ */
+export async function sendAdminBundleOrderNotice({
+  buyerName = 'Valued Customer',
+  targetPhone,
+  network,
+  packageName,
+  packagePrice,
+  orderLabel = 'N/A',
+  paymentMethod = 'Local',
+  customerEmail,
+  adminEmail = ADMIN_EMAIL
+}) {
+  if (!targetPhone || !network || !packageName) {
+    console.error('[EmailServices] Cannot send admin bundle order notice: missing bundle parameters');
+    return { success: false, error: 'Missing required bundle parameters' };
+  }
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>New Data Bundle Order - ${network.toUpperCase()} ${packageName}</title>
+    </head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F4F5; margin: 0; padding: 24px 12px; color: #18181B;">
+      <div style="max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06); border: 1px solid #E4E4E7;">
+        
+        ${getEmailHeaderHTML('New Data Bundle Order', `Network: ${network.toUpperCase()}`)}
+        
+        <div style="padding: 32px 24px;">
+          <p style="font-size: 15px; margin-top: 0; color: #18181B;">Hello <strong>Admin</strong>,</p>
+          <p style="font-size: 14px; color: #52525B; line-height: 1.5;">A new internet data bundle purchase was placed on Kwabz Store:</p>
+          
+          <div style="background-color: #FAFAFA; border: 1px solid #E4E4E7; border-left: 3px solid #000000; border-radius: 8px; padding: 18px; margin: 24px 0;">
+            <h3 style="margin: 0 0 10px 0; font-size: 12px; color: #71717A; text-transform: uppercase; letter-spacing: 1px; font-weight: 700;">Customer & Target SIM Info</h3>
+            <p style="margin: 6px 0; font-size: 14px; color: #18181B;"><strong>Customer Name:</strong> ${buyerName || 'N/A'}</p>
+            <p style="margin: 6px 0; font-size: 14px; color: #18181B;"><strong>Target SIM Phone:</strong> <span style="font-size: 16px; font-weight: 900; color: #000000;">${targetPhone}</span></p>
+            <p style="margin: 6px 0; font-size: 14px; color: #18181B;"><strong>Network Operator:</strong> <span style="font-weight: 800; text-transform: uppercase;">${network}</span></p>
+            ${customerEmail ? `<p style="margin: 6px 0; font-size: 14px; color: #18181B;"><strong>Customer Email:</strong> ${customerEmail}</p>` : ''}
+          </div>
+
+          <div style="background-color: #000000; border-radius: 8px; padding: 20px; text-align: center; margin: 24px 0; color: #FFFFFF;">
+            <span style="font-size: 11px; color: #A1A1AA; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; display: block; margin-bottom: 6px;">ORDER & BUNDLE PACKAGE</span>
+            <div style="font-size: 24px; font-weight: 900; color: #FFFFFF; margin-bottom: 4px;">${network.toUpperCase()} ${packageName}</div>
+            <div style="font-size: 16px; color: #10B981; font-weight: 700;">GHS ${Number(packagePrice || 0).toFixed(2)} (${paymentMethod.toUpperCase()})</div>
+            <div style="font-size: 12px; color: #A1A1AA; margin-top: 6px;">Order ID: ${orderLabel}</div>
+          </div>
+
+          <div style="text-align: center; margin-top: 32px;">
+            <a href="${STORE_URL}/admin-bundles.html" style="display: inline-block; background-color: #000000; color: #FFFFFF; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700; font-size: 14px; letter-spacing: 0.3px;">Open Admin Bundles Panel</a>
+          </div>
+        </div>
+
+        ${getEmailFooterHTML()}
+      </div>
+    </body>
+    </html>
+  `;
+
+  return await sendEmail({
+    to: adminEmail,
+    subject: `📶 Data Bundle Purchased: ${network.toUpperCase()} ${packageName} (${targetPhone})`,
+    html
+  });
+}
+

@@ -21,7 +21,8 @@ import {
   sendBlogJournalNotice,
   sendLostFoundNotice,
   sendThriftItemNotice,
-  sendProductAdNotice
+  sendProductAdNotice,
+  sendAdminBundleOrderNotice
 } from './emailServices.js';
 
 // Load Config
@@ -231,6 +232,26 @@ app.post('/api/notifications/seller-order', async (req, res) => {
   }
 });
 
+app.post('/api/notifications/bundle-order', async (req, res) => {
+  try {
+    const { buyerName, targetPhone, network, packageName, packagePrice, orderLabel, paymentMethod, customerEmail } = req.body;
+    const result = await sendAdminBundleOrderNotice({
+      buyerName,
+      targetPhone,
+      network,
+      packageName,
+      packagePrice,
+      orderLabel,
+      paymentMethod,
+      customerEmail
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending admin bundle order email notice:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/notifications/order-update', async (req, res) => {
   try {
     let { customerEmail, customerName, orderId, newStatus, statusNotes, totalAmount } = req.body;
@@ -246,9 +267,9 @@ app.post('/api/notifications/order-update', async (req, res) => {
             const foundEmail = oData.customer_email || (oData.customer && oData.customer.email) || oData.userEmail || oData.user_email || oData.email;
             if (foundEmail && foundEmail.includes('@') && foundEmail !== adminEmail) {
               customerEmail = foundEmail;
-            } else if (oData.customer_uid || oData.uid) {
-              const userDoc = await db.collection('users').doc(oData.customer_uid || oData.uid).get();
-              if (userDoc.exists && userDoc.data()?.email) {
+            } else if (oData.customer_uid || oData.uid || oData.user_id) {
+              const userDoc = await db.collection('users').doc(oData.customer_uid || oData.uid || oData.user_id).get();
+              if (userDoc.exists && userDoc.data()?.email && userDoc.data().email !== adminEmail) {
                 customerEmail = userDoc.data().email;
               }
             }
@@ -259,8 +280,9 @@ app.post('/api/notifications/order-update', async (req, res) => {
       }
     }
 
-    if (!customerEmail) {
-      customerEmail = adminEmail;
+    if (!customerEmail || !customerEmail.includes('@') || customerEmail === adminEmail) {
+      console.warn(`[API] Order update skipped for #${orderId}: No customer email found (admin fallback disabled)`);
+      return res.json({ success: false, error: 'No valid customer email attached to this order' });
     }
 
     const result = await sendUserOrderUpdateNotice({
