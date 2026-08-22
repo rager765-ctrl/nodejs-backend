@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import { handleUssdRequest } from './ussdEngine.js';
 import { isEmailConfigured, DEFAULT_FROM_EMAIL } from './emailConfig.js';
+import { sendAdminSellerOnboardingNotice, sendSellerOrderNotice, sendUserOrderUpdateNotice, sendPlatformAnnouncement } from './emailServices.js';
 
 // Load Config
 dotenv.config();
@@ -179,6 +180,82 @@ app.get('/api/email/status', (req, res) => {
     adminEmail: process.env.ADMIN_EMAIL || 'opoku3765@gmail.com',
     timestamp: new Date().toISOString()
   });
+});
+
+// ─── Resend Transactional Email Notification Routes ────────────
+app.post('/api/notifications/seller-onboarding', async (req, res) => {
+  try {
+    const { sellerName, sellerEmail, sellerPhone, storeName, activationPin } = req.body;
+    const result = await sendAdminSellerOnboardingNotice({
+      sellerName,
+      sellerEmail,
+      sellerPhone,
+      storeName,
+      activationPin
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending seller onboarding email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/seller-order', async (req, res) => {
+  try {
+    const { sellerEmail, sellerName, storeName, orderId, items, totalAmount, customerName, customerPhone, deliveryAddress } = req.body;
+    const result = await sendSellerOrderNotice({
+      sellerEmail,
+      sellerName,
+      storeName,
+      orderId,
+      items,
+      totalAmount,
+      customerName,
+      customerPhone,
+      deliveryAddress
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending seller order email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/order-update', async (req, res) => {
+  try {
+    const { customerEmail, customerName, orderId, newStatus, statusNotes, totalAmount } = req.body;
+    const result = await sendUserOrderUpdateNotice({
+      customerEmail,
+      customerName,
+      orderId,
+      newStatus,
+      statusNotes,
+      totalAmount
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending order update email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/platform-announcement', async (req, res) => {
+  try {
+    const { recipients, subject, title, message, actionUrl, actionText, bannerImageUrl } = req.body;
+    const result = await sendPlatformAnnouncement({
+      recipients,
+      subject,
+      title,
+      message,
+      actionUrl,
+      actionText,
+      bannerImageUrl
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending platform announcement email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 const httpServer = createServer(app);
