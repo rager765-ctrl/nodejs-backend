@@ -11,6 +11,7 @@ import { Server } from 'socket.io';
 import fs from 'fs';
 import path from 'path';
 import { handleUssdRequest } from './ussdEngine.js';
+import { isEmailConfigured, DEFAULT_FROM_EMAIL } from './emailConfig.js';
 
 // Load Config
 dotenv.config();
@@ -166,6 +167,19 @@ async function requireAuth(req, res, next) {
 // Allow large JSON bodies for base64 image uploads (up to 20 MB)
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+
+// ─── Resend Email Provider Status Route ────────────────────────
+app.get('/api/email/status', (req, res) => {
+  const configured = isEmailConfigured();
+  return res.json({
+    status: configured ? 'active' : 'unconfigured',
+    provider: 'Resend',
+    configured,
+    fromEmail: DEFAULT_FROM_EMAIL,
+    adminEmail: process.env.ADMIN_EMAIL || 'opoku3765@gmail.com',
+    timestamp: new Date().toISOString()
+  });
+});
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
