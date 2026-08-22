@@ -312,3 +312,200 @@ export async function sendPlatformAnnouncement({
     html
   });
 }
+
+/**
+ * 5. Send Campus Gig & Opportunity Notification
+ */
+export async function sendGigOpportunityNotice({
+  submitterName = 'Campus Member',
+  submitterEmail,
+  gigTitle,
+  gigCategory = 'General',
+  budget,
+  description,
+  adminEmail = ADMIN_EMAIL
+}) {
+  const targetRecipients = Array.from(new Set([adminEmail, submitterEmail].filter(Boolean)));
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>New Campus Gig: ${gigTitle}</title>
+    </head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F4F5; margin: 0; padding: 24px 12px; color: #18181B;">
+      <div style="max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06); border: 1px solid #E4E4E7;">
+        ${getEmailHeaderHTML('New Campus Gig Listed', `Category: ${gigCategory}`)}
+        <div style="padding: 32px 24px;">
+          <p style="font-size: 15px; margin-top: 0; color: #18181B;">A new opportunity has been posted on <strong>Kwabz Campus Gigs</strong>:</p>
+          <div style="background-color: #FAFAFA; border: 1px solid #E4E4E7; border-left: 3px solid #000000; border-radius: 8px; padding: 18px; margin: 24px 0;">
+            <p style="margin: 4px 0; font-size: 15px; color: #000000;"><strong>Title:</strong> ${gigTitle}</p>
+            <p style="margin: 4px 0; font-size: 14px; color: #18181B;"><strong>Posted By:</strong> ${submitterName} (${submitterEmail || 'N/A'})</p>
+            ${budget ? `<p style="margin: 4px 0; font-size: 14px; color: #18181B;"><strong>Budget / Reward:</strong> GHS ${Number(budget).toFixed(2)}</p>` : ''}
+            ${description ? `<p style="margin: 10px 0 0 0; font-size: 13px; color: #52525B; line-height: 1.5;">${description}</p>` : ''}
+          </div>
+          <div style="text-align: center; margin-top: 32px;">
+            <a href="${STORE_URL}/gigs.html" style="display: inline-block; background-color: #000000; color: #FFFFFF; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700; font-size: 14px;">View Campus Gigs</a>
+          </div>
+        </div>
+        ${getEmailFooterHTML()}
+      </div>
+    </body>
+    </html>
+  `;
+
+  return await sendEmail({
+    to: targetRecipients,
+    subject: `New Campus Gig: ${gigTitle}`,
+    html
+  });
+}
+
+/**
+ * 6. Send Campus Journal / Blog Post Notification
+ */
+export async function sendBlogJournalNotice({
+  title,
+  author = 'Kwabz Editorial',
+  category = 'Campus Journal',
+  excerpt,
+  postUrl = `${STORE_URL}/blog.html`,
+  adminEmail = ADMIN_EMAIL
+}) {
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>New Journal Article: ${title}</title>
+    </head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F4F5; margin: 0; padding: 24px 12px; color: #18181B;">
+      <div style="max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06); border: 1px solid #E4E4E7;">
+        ${getEmailHeaderHTML('Campus Journal Update', `Category: ${category}`)}
+        <div style="padding: 32px 24px;">
+          <p style="font-size: 13px; color: #71717A; text-transform: uppercase; font-weight: 700; letter-spacing: 1px; margin: 0 0 6px 0;">New Article Published</p>
+          <h2 style="font-size: 20px; font-weight: 800; color: #000000; margin: 0 0 12px 0;">${title}</h2>
+          <p style="font-size: 13px; color: #71717A; margin: 0 0 16px 0;">By <strong>${author}</strong></p>
+          ${excerpt ? `<div style="background-color: #FAFAFA; border: 1px solid #E4E4E7; border-radius: 8px; padding: 16px; font-size: 14px; color: #27272A; line-height: 1.6; margin-bottom: 24px;">${excerpt}</div>` : ''}
+          <div style="text-align: center; margin-top: 28px;">
+            <a href="${postUrl}" style="display: inline-block; background-color: #000000; color: #FFFFFF; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700; font-size: 14px;">Read Full Article</a>
+          </div>
+        </div>
+        ${getEmailFooterHTML()}
+      </div>
+    </body>
+    </html>
+  `;
+
+  return await sendEmail({
+    to: adminEmail,
+    subject: `New Journal Article: ${title}`,
+    html
+  });
+}
+
+/**
+ * 7. Send Lost and Found Alert Notification
+ */
+export async function sendLostFoundNotice({
+  reporterName = 'Campus Student',
+  reporterEmail,
+  reporterPhone,
+  itemType = 'Lost',
+  itemName,
+  location = 'Campus',
+  description,
+  adminEmail = ADMIN_EMAIL
+}) {
+  const targetRecipients = Array.from(new Set([adminEmail, reporterEmail].filter(Boolean)));
+  const typeLabel = (itemType || 'Lost').toUpperCase();
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${typeLabel} Item Reported: ${itemName}</title>
+    </head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F4F5; margin: 0; padding: 24px 12px; color: #18181B;">
+      <div style="max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06); border: 1px solid #E4E4E7;">
+        ${getEmailHeaderHTML('Lost and Found Report', `${typeLabel} ITEM ALERT`)}
+        <div style="padding: 32px 24px;">
+          <p style="font-size: 15px; margin-top: 0; color: #18181B;">A new <strong>${typeLabel}</strong> item report has been published on Kwabz Lost & Found:</p>
+          <div style="background-color: #FAFAFA; border: 1px solid #E4E4E7; border-left: 3px solid #000000; border-radius: 8px; padding: 18px; margin: 24px 0;">
+            <p style="margin: 4px 0; font-size: 15px; color: #000000;"><strong>Item Name:</strong> ${itemName}</p>
+            <p style="margin: 4px 0; font-size: 14px; color: #18181B;"><strong>Status:</strong> ${typeLabel}</p>
+            <p style="margin: 4px 0; font-size: 14px; color: #18181B;"><strong>Location:</strong> ${location}</p>
+            <p style="margin: 4px 0; font-size: 14px; color: #18181B;"><strong>Reporter:</strong> ${reporterName} ${reporterPhone ? `(${reporterPhone})` : ''}</p>
+            ${description ? `<p style="margin: 10px 0 0 0; font-size: 13px; color: #52525B; line-height: 1.5;">${description}</p>` : ''}
+          </div>
+          <div style="text-align: center; margin-top: 32px;">
+            <a href="${STORE_URL}/lost-found.html" style="display: inline-block; background-color: #000000; color: #FFFFFF; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700; font-size: 14px;">Open Lost & Found Hub</a>
+          </div>
+        </div>
+        ${getEmailFooterHTML()}
+      </div>
+    </body>
+    </html>
+  `;
+
+  return await sendEmail({
+    to: targetRecipients,
+    subject: `${typeLabel} Item Reported: ${itemName}`,
+    html
+  });
+}
+
+/**
+ * 8. Send Thrift Market Listing Notification
+ */
+export async function sendThriftItemNotice({
+  sellerName = 'Thrift Seller',
+  sellerEmail,
+  sellerPhone,
+  itemTitle,
+  price,
+  location = 'Campus',
+  condition = 'Pre-owned',
+  adminEmail = ADMIN_EMAIL
+}) {
+  const targetRecipients = Array.from(new Set([adminEmail, sellerEmail].filter(Boolean)));
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>New Thrift Listing: ${itemTitle}</title>
+    </head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F4F4F5; margin: 0; padding: 24px 12px; color: #18181B;">
+      <div style="max-width: 600px; margin: 0 auto; background: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06); border: 1px solid #E4E4E7;">
+        ${getEmailHeaderHTML('New Thrift Market Listing', `Condition: ${condition}`)}
+        <div style="padding: 32px 24px;">
+          <p style="font-size: 15px; margin-top: 0; color: #18181B;">A new pre-owned item was listed on <strong>Kwabz Thrift Market</strong>:</p>
+          <div style="background-color: #FAFAFA; border: 1px solid #E4E4E7; border-left: 3px solid #000000; border-radius: 8px; padding: 18px; margin: 24px 0;">
+            <p style="margin: 4px 0; font-size: 15px; color: #000000;"><strong>Item:</strong> ${itemTitle}</p>
+            <p style="margin: 4px 0; font-size: 15px; color: #000000; font-weight: 800;"><strong>Price:</strong> GHS ${Number(price || 0).toFixed(2)}</p>
+            <p style="margin: 4px 0; font-size: 14px; color: #18181B;"><strong>Seller:</strong> ${sellerName} ${sellerPhone ? `(${sellerPhone})` : ''}</p>
+            <p style="margin: 4px 0; font-size: 14px; color: #18181B;"><strong>Pickup Location:</strong> ${location}</p>
+          </div>
+          <div style="text-align: center; margin-top: 32px;">
+            <a href="${STORE_URL}/thrift.html" style="display: inline-block; background-color: #000000; color: #FFFFFF; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 700; font-size: 14px;">Browse Thrift Market</a>
+          </div>
+        </div>
+        ${getEmailFooterHTML()}
+      </div>
+    </body>
+    </html>
+  `;
+
+  return await sendEmail({
+    to: targetRecipients,
+    subject: `New Thrift Listing: ${itemTitle}`,
+    html
+  });
+}

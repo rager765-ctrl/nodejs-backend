@@ -12,7 +12,16 @@ import fs from 'fs';
 import path from 'path';
 import { handleUssdRequest } from './ussdEngine.js';
 import { isEmailConfigured, DEFAULT_FROM_EMAIL } from './emailConfig.js';
-import { sendAdminSellerOnboardingNotice, sendSellerOrderNotice, sendUserOrderUpdateNotice, sendPlatformAnnouncement } from './emailServices.js';
+import {
+  sendAdminSellerOnboardingNotice,
+  sendSellerOrderNotice,
+  sendUserOrderUpdateNotice,
+  sendPlatformAnnouncement,
+  sendGigOpportunityNotice,
+  sendBlogJournalNotice,
+  sendLostFoundNotice,
+  sendThriftItemNotice
+} from './emailServices.js';
 
 // Load Config
 dotenv.config();
@@ -254,6 +263,79 @@ app.post('/api/notifications/platform-announcement', async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error('[API] Error sending platform announcement email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/gig-opportunity', async (req, res) => {
+  try {
+    const { submitterName, submitterEmail, gigTitle, gigCategory, budget, description } = req.body;
+    const result = await sendGigOpportunityNotice({
+      submitterName,
+      submitterEmail,
+      gigTitle,
+      gigCategory,
+      budget,
+      description
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending gig opportunity email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/blog-journal', async (req, res) => {
+  try {
+    const { title, author, category, excerpt, postUrl } = req.body;
+    const result = await sendBlogJournalNotice({
+      title,
+      author,
+      category,
+      excerpt,
+      postUrl
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending blog journal email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/lost-found', async (req, res) => {
+  try {
+    const { reporterName, reporterEmail, reporterPhone, itemType, itemName, location, description } = req.body;
+    const result = await sendLostFoundNotice({
+      reporterName,
+      reporterEmail,
+      reporterPhone,
+      itemType,
+      itemName,
+      location,
+      description
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending lost & found email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications/thrift-item', async (req, res) => {
+  try {
+    const { sellerName, sellerEmail, sellerPhone, itemTitle, price, location, condition } = req.body;
+    const result = await sendThriftItemNotice({
+      sellerName,
+      sellerEmail,
+      sellerPhone,
+      itemTitle,
+      price,
+      location,
+      condition
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('[API] Error sending thrift item email:', err);
     return res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -1004,6 +1086,20 @@ function setupBackgroundSync() {
               url: '/'
             }
           }, 'all');
+
+          // Trigger Resend Email Push Announcement
+          try {
+            sendPlatformAnnouncement({
+              recipients: [process.env.ADMIN_EMAIL || 'opoku3765@gmail.com'],
+              subject: 'Platform Announcement: New Kwabz Store App Update Available',
+              title: 'App Update Available',
+              message: '<p style="font-size: 15px; color: #18181B; line-height: 1.6;">A fresh update has been deployed on <strong>Kwabz Store</strong>. Please open the app or refresh your browser to install the latest features, performance boosts, and bug fixes.</p>',
+              actionUrl: process.env.STORE_URL || 'https://kwabz.store',
+              actionText: 'Update App Now'
+            }).catch(e => console.error('[Firestore Sync] App Update Email Push Error:', e));
+          } catch (emailErr) {
+            console.error('[Firestore Sync] App Update Email Push Exception:', emailErr);
+          }
         }
       }
     }, err => {
