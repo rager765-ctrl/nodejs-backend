@@ -277,8 +277,9 @@ app.post('/api/notifications/wallet-topup', async (req, res) => {
 
 // ─── Paystack Live Server Integration & Verification ───
 app.get('/api/paystack/config', (req, res) => {
+  const isLiveMode = Boolean(process.env.PAYSTACK_SECRET_KEY && process.env.PAYSTACK_SECRET_KEY.startsWith('sk_live_'));
   res.json({
-    publicKey: process.env.PAYSTACK_PUBLIC_KEY || 'pk_live_74379b21fefbe46f6dd755f0f0c0ead6f15e099'
+    publicKey: process.env.PAYSTACK_PUBLIC_KEY || (isLiveMode ? 'pk_live_74379b21fefbe46f6dd755f0f0c0ead6f15e099' : 'pk_test_a19859a7af3bc5a984cf0cb0f40de99842fecaa8')
   });
 });
 
@@ -292,7 +293,9 @@ app.post('/api/paystack/initialize', async (req, res) => {
     const reference = 'KWABZ_PAYSTACK_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
     const amountInPesewas = Math.round(parseFloat(amount) * 100);
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    const publicKey = process.env.PAYSTACK_PUBLIC_KEY || 'pk_live_74379b21fefbe46f6dd755f0f0c0ead6f15e099';
+    const isLiveSecret = Boolean(secretKey && secretKey.startsWith('sk_live_'));
+    const defaultPublicKey = isLiveSecret ? 'pk_live_74379b21fefbe46f6dd755f0f0c0ead6f15e099' : 'pk_test_a19859a7af3bc5a984cf0cb0f40de99842fecaa8';
+    const publicKey = process.env.PAYSTACK_PUBLIC_KEY || defaultPublicKey;
 
     if (secretKey) {
       const response = await fetch('https://api.paystack.co/transaction/initialize', {
@@ -325,6 +328,8 @@ app.post('/api/paystack/initialize', async (req, res) => {
           reference: reference,
           publicKey: publicKey
         });
+      } else {
+        console.warn('[Paystack Init Warning]', data);
       }
     }
 
