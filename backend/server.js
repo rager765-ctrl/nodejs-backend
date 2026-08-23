@@ -299,7 +299,32 @@ app.post('/api/paystack/initialize', async (req, res) => {
       }
     }
 
+    // Server-Side Price Verification for Store Orders
+
+    if (payment_type === 'store_order' && req.body.cart_items && Array.isArray(req.body.cart_items) && db) {
+      let expectedTotal = 0;
+      for (const item of req.body.cart_items) {
+        const prodId = item.product_id || item.id;
+        if (!prodId || String(prodId).startsWith('food_')) continue;
+        const prodSnap = await db.collection('products').doc(String(prodId)).get();
+        if (prodSnap.exists && prodSnap.data().price) {
+          expectedTotal += parseFloat(prodSnap.data().price) * (parseInt(item.quantity) || 1);
+        } else {
+          expectedTotal += parseFloat(item.price || 0) * (parseInt(item.quantity) || 1);
+        }
+      }
+      const deliveryFee = parseFloat(req.body.delivery_fee || 0);
+      const discount = parseFloat(req.body.promo_discount || 0);
+      expectedTotal = Math.max(0, expectedTotal - discount + deliveryFee);
+
+      if (expectedTotal > 0 && Math.abs(parseFloat(amount) - expectedTotal) > 0.5) {
+        console.warn(`[Security Alert] Paystack price mismatch detected! Client: ${amount}, DB Expected: ${expectedTotal}`);
+        return res.status(400).json({ success: false, error: '🚨 Price discrepancy detected. Payment amount must match official store catalog pricing.' });
+      }
+    }
+
     const reference = 'KWABZ_PAYSTACK_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+
     const amountInPesewas = Math.round(parseFloat(amount) * 100);
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
     const isLiveSecret = Boolean(secretKey && secretKey.startsWith('sk_live_'));
