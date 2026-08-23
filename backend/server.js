@@ -285,16 +285,17 @@ app.get('/api/paystack/config', (req, res) => {
 
 app.post('/api/paystack/initialize', async (req, res) => {
   try {
-    const { email, amount, userUid, userName, senderPhone } = req.body;
+    const { email, amount, userUid, userName, senderPhone, payment_type, is_topup } = req.body;
     if (!email || !amount || amount <= 0) {
       return res.status(400).json({ success: false, error: 'Valid email and amount are required' });
     }
 
-    // Check if user's wallet is locked
-    if (userUid && db) {
+    // Only block wallet top-ups if wallet is locked (allow store purchases & seller plan payments)
+    const isWalletTopup = is_topup === true || payment_type === 'wallet_topup' || (!payment_type && req.body.is_topup !== false && payment_type !== 'store_order' && payment_type !== 'seller_subscription_upgrade');
+    if (isWalletTopup && userUid && db && userUid !== 'guest') {
       const userSnap = await db.collection('users').doc(userUid).get();
       if (userSnap.exists && userSnap.data().wallet_locked === true) {
-        return res.status(403).json({ success: false, error: '🔒 Your account wallet is locked by Admin. Top-ups and transactions are disabled.' });
+        return res.status(403).json({ success: false, error: '🔒 Your account wallet is locked by Admin. Wallet top-ups are disabled.' });
       }
     }
 
@@ -322,7 +323,7 @@ app.post('/api/paystack/initialize', async (req, res) => {
               { display_name: "Customer Name", variable_name: "customer_name", value: userName || 'Customer' },
               { display_name: "Sender Phone", variable_name: "sender_phone", value: senderPhone || '' },
               { display_name: "User UID", variable_name: "user_uid", value: userUid || '' },
-              { display_name: "Payment Type", variable_name: "payment_type", value: "wallet_topup" }
+              { display_name: "Payment Type", variable_name: "payment_type", value: payment_type || "wallet_topup" }
             ]
           }
         })
@@ -356,18 +357,53 @@ app.post('/api/paystack/initialize', async (req, res) => {
 
 app.post('/api/paystack/verify', async (req, res) => {
   try {
-    const { reference, userUid, userEmail, userName, amount } = req.body;
-    if (!reference || !userUid) {
-      return res.status(400).json({ success: false, error: 'Missing reference or userUid' });
+    const { reference, userUid, userEmail, userName, amount, payment_type, is_topup } = req.body;
+    if (!reference) {
+      return res.status(400).json({ success: false, error: 'Missing reference' });
     }
 
-    // Check if user's wallet is locked
-    if (userUid && db) {
+    const isWalletTopup = is_topup === true || payment_type === 'wallet_topup' || (!payment_type && req.body.is_topup !== false && payment_type !== 'store_order' && payment_type !== 'seller_subscription_upgrade');
+
+    // Only check wallet lock if this is a WALLET TOP-UP
+    if (isWalletTopup && userUid && db && userUid !== 'guest') {
       const userSnap = await db.collection('users').doc(userUid).get();
       if (userSnap.exists && userSnap.data().wallet_locked === true) {
-        return res.status(403).json({ success: false, error: '🔒 Account wallet is locked by Admin. Top-ups and transactions are disabled.' });
+        return res.status(403).json({ success: false, error: '🔒 Account wallet is locked by Admin. Wallet top-ups are disabled.' });
       }
     }
+
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    let verifiedAmount = parseFloat(amount || 0);
+    let verifiedEmail = userEmail || '';
+    let verifyData = null;
+
+    if (secretKey) {
+      const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+        headers: { 'Authorization': `Bearer ${secretKey}` }
+      });
+      verifyData = await verifyRes.json();
+      if (!verifyData.status || verifyData.data.status !== 'success') {
+        return res.status(400).json({ success: false, error: 'Paystack payment verification failed or unconfirmed' });
+      }
+
+      verifiedAmount = parseFloat((verifyData.data.amount / 100).toFixed(2));
+      verifiedEmail = verifyData.data.customer?.email || userEmail || '';
+    }
+
+    if (!verifiedAmount || verifiedAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'Invalid verified payment amount' });
+    }
+
+    // If NOT a wallet topup (e.g. store order or seller plan payment), return success without crediting user wallet balance
+    if (!isWalletTopup) {
+      return res.json({
+        success: true,
+        reference: reference,
+        amount: verifiedAmount,
+        message: 'Paystack payment verified successfully'
+      });
+    }
+
 
     // 1. Idempotency Check (prevent double credit)
     const existingTx = await db.collection('wallet_transactions').where('reference', '==', reference).get();
@@ -381,28 +417,9 @@ app.post('/api/paystack/verify', async (req, res) => {
       });
     }
 
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    let verifiedAmount = parseFloat(amount || 0);
-    let verifiedEmail = userEmail || '';
-
-    if (secretKey) {
-      const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-        headers: { 'Authorization': `Bearer ${secretKey}` }
-      });
-      const verifyData = await verifyRes.json();
-      if (!verifyData.status || verifyData.data.status !== 'success') {
-        return res.status(400).json({ success: false, error: 'Paystack payment verification failed or unconfirmed' });
-      }
-      verifiedAmount = parseFloat((verifyData.data.amount / 100).toFixed(2));
-      verifiedEmail = verifyData.data.customer?.email || userEmail || '';
-    }
-
-    if (!verifiedAmount || verifiedAmount <= 0) {
-      return res.status(400).json({ success: false, error: 'Invalid verified payment amount' });
-    }
-
     // 2. Perform Atomic Wallet Balance Credit via Admin SDK
     const userRef = db.collection('users').doc(userUid);
+
     await userRef.set({
       wallet_balance: FieldValue.increment(verifiedAmount)
     }, { merge: true });
