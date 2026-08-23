@@ -419,6 +419,36 @@ app.post('/api/paystack/verify', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid verified payment amount' });
     }
 
+    // Handle Eco Project Freewill Donations on Backend
+    if (req.body.payment_type === 'eco_donation' || payment_type === 'eco_donation') {
+      if (db) {
+        try {
+          const ecoRef = db.collection('eco_donations').doc();
+          await ecoRef.set({
+            donation_id: ecoRef.id,
+            user_uid: userUid || 'guest',
+            user_email: verifiedEmail || req.body.userEmail || '',
+            amount: verifiedAmount,
+            reference: reference,
+            paystack_ref: reference,
+            project: 'zero_plastic_campus',
+            status: 'completed',
+            payment_method: 'Paystack MoMo/Card',
+            created_at: new Date().toISOString()
+          }, { merge: true });
+          console.log(`[Eco Project] Verified Paystack donation of GH₵ ${verifiedAmount} for ref: ${reference}`);
+        } catch (ecoErr) {
+          console.warn('[Eco Project Log Warning]', ecoErr);
+        }
+      }
+      return res.json({
+        success: true,
+        reference: reference,
+        amount: verifiedAmount,
+        message: 'Eco Project donation verified & referenced successfully'
+      });
+    }
+
     // If NOT a wallet topup (e.g. store order or seller plan payment), return success without crediting user wallet balance
     if (!isWalletTopup) {
       return res.json({
@@ -428,6 +458,7 @@ app.post('/api/paystack/verify', async (req, res) => {
         message: 'Paystack payment verified successfully'
       });
     }
+
 
 
     // 1. Idempotency Check (prevent double credit)
@@ -536,7 +567,35 @@ app.post('/api/paystack/webhook', async (req, res) => {
         }
       }
 
-      if (userUid && reference && amount > 0) {
+      // Record Eco Donations in Webhook if payment_type is eco_donation
+
+      const isEco = reference && (reference.includes('_ECO_') || (data.metadata && data.metadata.payment_type === 'eco_donation'));
+      if (isEco && db) {
+        try {
+          const existingEco = await db.collection('eco_donations').where('reference', '==', reference).get();
+          if (existingEco.empty) {
+            const ecoDoc = db.collection('eco_donations').doc();
+            await ecoDoc.set({
+              donation_id: ecoDoc.id,
+              user_uid: userUid || 'guest',
+              user_email: userEmail || '',
+              amount: amount,
+              reference: reference,
+              paystack_ref: reference,
+              project: 'zero_plastic_campus',
+              status: 'completed',
+              payment_method: 'Paystack MoMo/Card',
+              created_at: new Date().toISOString()
+            }, { merge: true });
+            console.log(`[Eco Webhook] Recorded donation of GH₵ ${amount} for ref: ${reference}`);
+          }
+        } catch (ecoErr) {
+          console.warn('[Eco Webhook Warning]', ecoErr);
+        }
+      }
+
+      if (userUid && reference && amount > 0 && !isEco) {
+
         const existingTx = await db.collection('wallet_transactions').where('reference', '==', reference).get();
         if (existingTx.empty) {
           const userRef = db.collection('users').doc(userUid);
