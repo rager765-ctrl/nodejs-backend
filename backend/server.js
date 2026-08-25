@@ -3584,8 +3584,6 @@ Return JSON with NO markdown code blocks. The JSON object must contain:
 6. "suggested_price_ghs": Estimated retail price in Ghana Cedi (GH₵) as a numeric value (e.g. 150).
 7. "color_matching_tips": A short sentence providing fashion or styling color coordination advice based on the detected palette.`;
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
     const payload = {
       contents: [
         {
@@ -3601,15 +3599,30 @@ Return JSON with NO markdown code blocks. The JSON object must contain:
       }
     };
 
-    const response = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+    let response = null;
+    let errText = '';
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini API error (${response.status}): ${errText}`);
+    for (const model of candidateModels) {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch((fetchErr) => {
+        errText = fetchErr.message;
+        return null;
+      });
+
+      if (response && response.ok) break;
+      if (response) {
+        errText = await response.text().catch(() => '');
+        console.warn(`[Gemini AI] Model ${model} returned ${response.status}: ${errText}`);
+      }
+    }
+
+    if (!response || !response.ok) {
+      throw new Error(`Gemini API error (${response?.status || 500}): ${errText}`);
     }
 
     const geminiData = await response.json();
