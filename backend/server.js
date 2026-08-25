@@ -3644,6 +3644,87 @@ Return JSON with NO markdown code blocks. The JSON object must contain:
   }
 });
 
+// ─── Gemini AI Store Broadcast & Announcement Generator ───
+app.post('/api/ai/generate-broadcast', async (req, res) => {
+  try {
+    const { prompt, tone = 'exciting', promoCode = '', dealUrl = '' } = req.body || {};
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    if (!apiKey) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is not configured on Render server.' });
+    }
+
+    if (!prompt || !prompt.trim()) {
+      return res.status(400).json({ error: 'Please provide a brief overview prompt for the announcement' });
+    }
+
+    const systemPrompt = `You are an expert e-commerce copywriter for Kwabz Store, a vibrant campus commerce & social shopping platform in Ghana.
+The administrator has provided a brief outline/overview of a store announcement or promotional deal:
+"${prompt.trim()}"
+
+Tone style requested: ${tone}
+${promoCode ? `Promo Code to include/highlight: ${promoCode}` : ''}
+${dealUrl ? `Link to include: ${dealUrl}` : ''}
+
+Generate a polished, high-converting store announcement. Return ONLY JSON with NO markdown code block wrappers:
+{
+  "title": "A short, catchy headline title with an emoji (max 50 chars)",
+  "message": "The complete polished broadcast announcement text. Use emojis thoughtfully, include bullet points for features/deals if relevant, highlight discounts or promo code, and end with a clear compelling Call To Action (CTA).",
+  "tag": "Category Tag (choose best from: FLASH SALE, NEW ARRIVAL, CAMPUS DEAL, ANNOUNCEMENT, FOOD HUB, THRIFT DROP)"
+}`;
+
+    const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+    let response = null;
+    let errText = '';
+
+    const payload = {
+      contents: [{ parts: [{ text: systemPrompt }] }],
+      generationConfig: {
+        temperature: 0.7,
+        response_mime_type: "application/json"
+      }
+    };
+
+    for (const model of candidateModels) {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch((fetchErr) => {
+        errText = fetchErr.message;
+        return null;
+      });
+
+      if (response && response.ok) break;
+      if (response) {
+        errText = await response.text().catch(() => '');
+        console.warn(`[Gemini Broadcast AI] Model ${model} returned ${response.status}: ${errText}`);
+      }
+    }
+
+    if (!response || !response.ok) {
+      throw new Error(`Gemini API error (${response?.status || 500}): ${errText}`);
+    }
+
+    const geminiData = await response.json();
+    const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+
+    let parsedData = {};
+    try {
+      const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      parsedData = JSON.parse(cleanJson);
+    } catch (e) {
+      console.warn('Failed to parse Gemini Broadcast JSON output:', e.message);
+      parsedData = { message: rawText, title: 'Store Announcement', tag: 'ANNOUNCEMENT' };
+    }
+
+    return res.json({ success: true, data: parsedData });
+  } catch (err) {
+    console.error('❌ Gemini Broadcast AI Error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── USSD Gateway Endpoint (Hubtel, Africa's Talking, Nalo & Web Simulator) ───
 app.all('/api/ussd', async (req, res) => {
   try {
