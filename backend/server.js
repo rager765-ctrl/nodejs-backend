@@ -3770,38 +3770,58 @@ GUIDELINES:
 - Always encourage students to explore the Shop, Food Hub, and Thrift pages!`;
 
     const contents = [];
-    contents.push({ parts: [{ text: systemContext }] });
 
     if (Array.isArray(history)) {
       history.slice(-6).forEach(h => {
+        const textVal = (h.text || h.message || '').trim();
+        if (!textVal) return;
         if (h.sender === 'user' || h.role === 'user') {
-          contents.push({ parts: [{ text: `Student: ${h.text || h.message}` }] });
+          contents.push({ role: 'user', parts: [{ text: textVal }] });
         } else if (h.sender === 'ai' || h.role === 'model') {
-          contents.push({ parts: [{ text: `Kwabz AI: ${h.text || h.message}` }] });
+          contents.push({ role: 'model', parts: [{ text: textVal }] });
         }
       });
     }
 
-    contents.push({ parts: [{ text: `Student Query: ${message.trim()}` }] });
+    contents.push({ role: 'user', parts: [{ text: message.trim() }] });
 
     const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
     let response = null;
     let errText = '';
 
-    const payload = {
+    const payloadWithSys = {
+      systemInstruction: { parts: [{ text: systemContext }] },
       contents: contents,
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 600
-      }
+      generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }
+    };
+
+    const payloadFallback = {
+      contents: [
+        { role: 'user', parts: [{ text: `${systemContext}\n\nStudent Query: ${message.trim()}` }] }
+      ],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }
     };
 
     for (const model of candidateModels) {
       const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      
+      // Attempt 1: systemInstruction + multi-turn
       response = await fetch(geminiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payloadWithSys)
+      }).catch((fetchErr) => {
+        errText = fetchErr.message;
+        return null;
+      });
+
+      if (response && response.ok) break;
+
+      // Attempt 2: Fallback combined prompt
+      response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadFallback)
       }).catch((fetchErr) => {
         errText = fetchErr.message;
         return null;
