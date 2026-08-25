@@ -3725,6 +3725,109 @@ Generate a polished, high-converting store announcement. Return ONLY JSON with N
   }
 });
 
+// ─── Kwabz Personalised Shopping & Campus Life AI Assistant Endpoint ───
+app.post('/api/ai/shopping-assistant', async (req, res) => {
+  try {
+    const { message, clientCatalog = [], history = [] } = req.body || {};
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    if (!apiKey) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is not configured on Render server.' });
+    }
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ error: 'Please enter a message for the Shopping AI Assistant' });
+    }
+
+    const allProducts = Array.isArray(cache.products) && cache.products.length > 0 ? cache.products : (Array.isArray(clientCatalog) ? clientCatalog : []);
+    const productSummary = allProducts.slice(0, 30).map(p => {
+      const pName = p.name || p.title || 'Item';
+      const pPrice = p.price || 0;
+      const pCat = p.category || 'General';
+      const pSeller = p.seller_name || p.sellerName || 'Kwabz Merchant';
+      return `- ${pName} (${pCat}) | GH₵ ${Number(pPrice).toFixed(2)} [Seller: ${pSeller}]`;
+    }).join('\n');
+
+    const foodCategoriesSummary = (cache.foodCategories || []).slice(0, 10).map(f => f.name).join(', ');
+    const categoriesSummary = (cache.categories || []).slice(0, 15).map(c => c.name).join(', ');
+
+    const systemContext = `You are "Kwabz AI", the friendly, knowledgeable, and trend-savvy Personal Shopping & Campus Life Assistant for Kwabz Store (Ghana's top campus commerce platform).
+Your goal is to help students with:
+1. Recommending live products, food meals, campus thrift items, and mobile data bundles available on Kwabz Store.
+2. Giving student budget shopping advice in Ghana Cedi (GH₵).
+3. Providing fashion/styling tips, hostel living advice, exam prep food recommendations, and gift ideas for course mates.
+
+CURRENT LIVE KWABZ STORE CATALOG CONTEXT:
+Categories available: ${categoriesSummary || 'Electronics, Fashion, Thrift, Food Hub, Accessories, Books, Bundles'}
+Food Hub options: ${foodCategoriesSummary || 'Spicy Jollof, Fried Rice, Fast Food, Drinks & Pastries'}
+Featured Products Preview:
+${productSummary || 'Browse shoes, sneakers, clothing, phones, gadgets, thrift deals, and hostel items!'}
+
+GUIDELINES:
+- Be warm, helpful, energetic, and student-focused!
+- Use emojis and clear markdown bolding/formatting.
+- Mention prices in GH₵ (Ghana Cedi).
+- Keep responses concise (150-250 words max) so they fit nicely in a mobile chat drawer.
+- Always encourage students to explore the Shop, Food Hub, and Thrift pages!`;
+
+    const contents = [];
+    contents.push({ parts: [{ text: systemContext }] });
+
+    if (Array.isArray(history)) {
+      history.slice(-6).forEach(h => {
+        if (h.sender === 'user' || h.role === 'user') {
+          contents.push({ parts: [{ text: `Student: ${h.text || h.message}` }] });
+        } else if (h.sender === 'ai' || h.role === 'model') {
+          contents.push({ parts: [{ text: `Kwabz AI: ${h.text || h.message}` }] });
+        }
+      });
+    }
+
+    contents.push({ parts: [{ text: `Student Query: ${message.trim()}` }] });
+
+    const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+    let response = null;
+    let errText = '';
+
+    const payload = {
+      contents: contents,
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 600
+      }
+    };
+
+    for (const model of candidateModels) {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch((fetchErr) => {
+        errText = fetchErr.message;
+        return null;
+      });
+
+      if (response && response.ok) break;
+      if (response) {
+        errText = await response.text().catch(() => '');
+        console.warn(`[Kwabz Shopping AI] Model ${model} returned ${response.status}: ${errText}`);
+      }
+    }
+
+    if (!response || !response.ok) {
+      throw new Error(`Gemini API error (${response?.status || 500}): ${errText}`);
+    }
+
+    const geminiData = await response.json();
+    const replyText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't process that request right now. Try asking about our latest sneaker drops or food hub deals!";
+
+    return res.json({ success: true, reply: replyText });
+  } catch (err) {
+    console.error('❌ Kwabz Shopping AI Error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── USSD Gateway Endpoint (Hubtel, Africa's Talking, Nalo & Web Simulator) ───
 app.all('/api/ussd', async (req, res) => {
   try {
