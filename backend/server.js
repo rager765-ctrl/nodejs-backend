@@ -3537,6 +3537,10 @@ app.post('/api/upload', requireAuth, async (req, res) => {
 
   } catch (err) {
     console.error('[Cloudinary Proxy] Unexpected error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Gemini 1.5 Vision AI Product Analysis Endpoint ───
 app.post('/api/ai/analyze-product', async (req, res) => {
   try {
