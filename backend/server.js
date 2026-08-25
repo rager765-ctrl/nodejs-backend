@@ -3762,12 +3762,13 @@ Food Hub options: ${foodCategoriesSummary || 'Spicy Jollof, Fried Rice, Fast Foo
 Featured Products Preview:
 ${productSummary || 'Browse shoes, sneakers, clothing, phones, gadgets, thrift deals, and hostel items!'}
 
-GUIDELINES:
-- Be warm, helpful, energetic, and student-focused!
-- Use emojis and clear markdown bolding/formatting.
-- Mention prices in GH₵ (Ghana Cedi).
-- Keep responses concise (150-250 words max) so they fit nicely in a mobile chat drawer.
-- Always encourage students to explore the Shop, Food Hub, and Thrift pages!`;
+GUIDELINES FOR RESPONSE FORMATTING:
+- Keep the tone professional, sleek, helpful, and student-focused.
+- MINIMAL EMOJIS: Use at most 1-2 subtle emojis total per response. Do NOT spam emojis.
+- NO HASHES (#) OR RAW ASTERISK SYMBOLS (*). Do not write markdown headers like ### or list asterisks *. Use clean plain text.
+- Mention prices in Ghana Cedi (GH₵).
+- Keep recommendations concise (100-180 words max) to avoid long distorted messages.
+- Always end your response by asking the user if they want more recommendations or further details (e.g. "Would you like more options or specific styling advice?").`;
 
     const contents = [];
 
