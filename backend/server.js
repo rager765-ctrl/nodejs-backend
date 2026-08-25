@@ -3537,6 +3537,92 @@ app.post('/api/upload', requireAuth, async (req, res) => {
 
   } catch (err) {
     console.error('[Cloudinary Proxy] Unexpected error:', err.message);
+// ─── Gemini 1.5 Vision AI Product Analysis Endpoint ───
+app.post('/api/ai/analyze-product', async (req, res) => {
+  try {
+    const { imageBase64, mimeType = 'image/jpeg', imageUrl } = req.body || {};
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    if (!apiKey) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is not configured on Render server.' });
+    }
+
+    let inlineData = null;
+
+    if (imageBase64) {
+      const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      inlineData = {
+        mime_type: mimeType,
+        data: cleanBase64
+      };
+    } else if (imageUrl) {
+      const imgRes = await fetch(imageUrl);
+      if (!imgRes.ok) throw new Error('Failed to fetch image from URL');
+      const arrayBuffer = await imgRes.arrayBuffer();
+      const base64Str = Buffer.from(arrayBuffer).toString('base64');
+      const contentType = imgRes.headers.get('content-type') || mimeType;
+      inlineData = {
+        mime_type: contentType,
+        data: base64Str
+      };
+    }
+
+    if (!inlineData) {
+      return res.status(400).json({ error: 'Please provide an imageBase64 or imageUrl' });
+    }
+
+    const promptText = `Analyze this product image carefully. Extract and generate detailed e-commerce metadata formatted strictly as JSON.
+Return JSON with NO markdown code blocks. The JSON object must contain:
+1. "name": A catchy, professional product name (max 60 chars).
+2. "category": Most appropriate category (choose best match from: Electronics, Fashion & Apparel, Shoes & Footwear, Campus Thrift & Dashouts, Health & Beauty, Home & Living, Food & Groceries, Books & Stationery, Accessories, Sports & Fitness, General).
+3. "description": An engaging 2-3 sentence editorial product description highlighting key features and design.
+4. "details": Detailed specifications in bullet points including materials, style, build finish, care instructions, and recommended use case.
+5. "colors": Array of color swatches [{ "hex": "#HEXCOLOR", "name": "Color Name" }]. Detect up to 4 primary or accent colors present in the item.
+6. "suggested_price_ghs": Estimated retail price in Ghana Cedi (GH₵) as a numeric value (e.g. 150).
+7. "color_matching_tips": A short sentence providing fashion or styling color coordination advice based on the detected palette.`;
+
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+    const payload = {
+      contents: [
+        {
+          parts: [
+            { inline_data: inlineData },
+            { text: promptText }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.2,
+        response_mime_type: "application/json"
+      }
+    };
+
+    const response = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini API error (${response.status}): ${errText}`);
+    }
+
+    const geminiData = await response.json();
+    const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    
+    let parsedData = {};
+    try {
+      const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      parsedData = JSON.parse(cleanJson);
+    } catch (e) {
+      console.warn('Failed to parse Gemini JSON output directly:', e.message);
+      parsedData = { raw: rawText };
+    }
+
+    return res.json({ success: true, data: parsedData });
+  } catch (err) {
+    console.error('❌ Gemini Vision AI Analysis Error:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
