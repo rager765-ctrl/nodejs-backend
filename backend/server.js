@@ -4186,7 +4186,8 @@ GUIDELINES FOR RESPONSE FORMATTING:
     }
 
     if (!response || !response.ok) {
-      throw new Error(`Gemini API error (${response?.status || 500}): ${errText}`);
+      console.warn(`[Kwabz Shopping AI] All Gemini candidate models failed (${response?.status || 500}): ${errText}`);
+      return res.status(504).json({ error: 'Kwabz AI Timeout', message: 'Kwabz AI request timed out or service is currently busy. Please try again shortly.' });
     }
 
     const geminiData = await response.json();
@@ -4195,7 +4196,7 @@ GUIDELINES FOR RESPONSE FORMATTING:
     return res.json({ success: true, reply: replyText });
   } catch (err) {
     console.error('❌ Kwabz Shopping AI Error:', err.message);
-    return res.status(500).json({ error: err.message });
+    return res.status(504).json({ error: 'Kwabz AI Timeout', message: 'Kwabz AI request timed out or service is currently busy. Please try again shortly.' });
   }
 });
 
