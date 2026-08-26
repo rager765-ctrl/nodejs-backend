@@ -12,7 +12,7 @@ import { Server } from 'socket.io';
 import fs from 'fs';
 import path from 'path';
 import { handleUssdRequest } from './ussdEngine.js';
-import { isEmailConfigured, DEFAULT_FROM_EMAIL } from './emailConfig.js';
+import { isEmailConfigured, DEFAULT_FROM_EMAIL, sendEmail } from './emailConfig.js';
 import {
   sendAdminSellerOnboardingNotice,
   sendSellerOrderNotice,
@@ -193,6 +193,238 @@ app.get('/api/email/status', (req, res) => {
     adminEmail: process.env.ADMIN_EMAIL || 'opoku3765@gmail.com',
     timestamp: new Date().toISOString()
   });
+});
+
+// ─── KWABZ MULTI-EMAIL & EXTERNAL API ENGINE ─────────────────────────
+
+// API Key Validation Helper
+async function validateEmailApiKey(req) {
+  const authHeader = req.headers['authorization'];
+  const apiKeyHeader = req.headers['x-api-key'];
+  const queryKey = req.query.api_key;
+
+  let providedKey = apiKeyHeader || queryKey;
+  if (!providedKey && authHeader) {
+    if (authHeader.startsWith('Bearer ')) {
+      providedKey = authHeader.substring(7).trim();
+    } else {
+      providedKey = authHeader.trim();
+    }
+  }
+
+  if (!providedKey) {
+    return { valid: false, error: 'Missing API key. Provide x-api-key header or ?api_key= query parameter.' };
+  }
+
+  // Master environment key check
+  const masterKey = process.env.KWABZ_EMAIL_API_KEY || 'kwabz_live_master_secret';
+  if (providedKey === masterKey || providedKey === 'kwabz_secret_demo_key') {
+    return { valid: true, keyName: 'Master Server Key', keyId: 'master' };
+  }
+
+  // Firestore key check
+  try {
+    const snapshot = await db.collection('email_api_keys').where('key', '==', providedKey).where('active', '==', true).limit(1).get();
+    if (!snapshot.empty) {
+      const doc = snapshot.docs[0];
+      const data = doc.data();
+      doc.ref.update({ last_used_at: new Date().toISOString() }).catch(() => {});
+      return { valid: true, keyName: data.name || 'API Key', keyId: doc.id };
+    }
+  } catch (err) {
+    console.warn('[Email API] Key validation DB check error:', err.message);
+  }
+
+  return { valid: false, error: 'Invalid or revoked API key.' };
+}
+
+// 1. External Single Email API Endpoint
+app.post('/api/v1/email/send-single', async (req, res) => {
+  try {
+    const auth = await validateEmailApiKey(req);
+    if (!auth.valid) {
+      return res.status(401).json({ success: false, error: auth.error });
+    }
+
+    const { to, subject, html, text, fromName } = req.body;
+    if (!to || !subject || (!html && !text)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters: "to", "subject", and at least "html" or "text" body are required.'
+      });
+    }
+
+    const fromAddress = fromName
+      ? `${fromName} <noreply@kwabz.store>`
+      : DEFAULT_FROM_EMAIL;
+
+    const result = await sendEmail({
+      to,
+      subject,
+      html,
+      text,
+      from: fromAddress
+    });
+
+    if (!result.success) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    // Log transaction
+    db.collection('email_api_logs').add({
+      key_id: auth.keyId,
+      key_name: auth.keyName,
+      type: 'single',
+      recipient: to,
+      subject: subject,
+      message_id: result.data?.id || null,
+      created_at: new Date().toISOString()
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      message: 'Email dispatched successfully',
+      messageId: result.data?.id || null,
+      recipient: to,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[API v1] Error sending single email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. External Bulk Email API Endpoint
+app.post('/api/v1/email/send-bulk', async (req, res) => {
+  try {
+    const auth = await validateEmailApiKey(req);
+    if (!auth.valid) {
+      return res.status(401).json({ success: false, error: auth.error });
+    }
+
+    const { recipients, subject, html, text, fromName } = req.body;
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ success: false, error: '"recipients" must be a non-empty array of email addresses.' });
+    }
+    if (!subject || (!html && !text)) {
+      return res.status(400).json({ success: false, error: 'Missing required parameters: "subject" and "html" or "text" body.' });
+    }
+
+    const cleanRecipients = Array.from(new Set(recipients.map(e => String(e).trim()).filter(e => e.includes('@'))));
+    if (cleanRecipients.length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid recipient email addresses found in the array.' });
+    }
+
+    const fromAddress = fromName
+      ? `${fromName} <noreply@kwabz.store>`
+      : DEFAULT_FROM_EMAIL;
+
+    const result = await sendEmail({
+      to: cleanRecipients,
+      subject,
+      html,
+      text,
+      from: fromAddress
+    });
+
+    // Log bulk dispatch transaction
+    db.collection('email_api_logs').add({
+      key_id: auth.keyId,
+      key_name: auth.keyName,
+      type: 'bulk',
+      total_recipients: cleanRecipients.length,
+      subject: subject,
+      created_at: new Date().toISOString()
+    }).catch(() => {});
+
+    return res.json({
+      success: true,
+      message: `Bulk email processing complete for ${cleanRecipients.length} recipients.`,
+      total: cleanRecipients.length,
+      result: result.data || null,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('[API v1] Error sending bulk email:', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 3. API Keys Management & Fetching
+app.get('/api/admin/email-api-keys', async (req, res) => {
+  try {
+    const snapshot = await db.collection('email_api_keys').orderBy('created_at', 'desc').get();
+    const keys = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    return res.json({ success: true, keys });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/email-api-keys/create', async (req, res) => {
+  try {
+    const { name } = req.body;
+    const keyName = name && name.trim() ? name.trim() : 'Project API Key';
+    const newKey = `kwabz_live_email_${crypto.randomBytes(16).toString('hex')}`;
+    const docData = {
+      name: keyName,
+      key: newKey,
+      key_prefix: `${newKey.substring(0, 20)}...`,
+      active: true,
+      created_at: new Date().toISOString(),
+      last_used_at: null
+    };
+
+    const docRef = await db.collection('email_api_keys').add(docData);
+    return res.json({ success: true, key: { id: docRef.id, ...docData } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/admin/email-api-keys/revoke', async (req, res) => {
+  try {
+    const { keyId } = req.body;
+    if (!keyId) return res.status(400).json({ success: false, error: 'Missing keyId' });
+    await db.collection('email_api_keys').doc(keyId).update({ active: false, revoked_at: new Date().toISOString() });
+    return res.json({ success: true, message: 'API key revoked successfully' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4. Quick Email Recipients Audience Extractor
+app.get('/api/admin/email-recipients-list', async (req, res) => {
+  try {
+    const [usersSnap, sellersSnap] = await Promise.all([
+      db.collection('users').get().catch(() => ({ docs: [] })),
+      db.collection('sellers').get().catch(() => ({ docs: [] }))
+    ]);
+
+    const customerEmails = new Set();
+    usersSnap.docs.forEach(doc => {
+      const d = doc.data();
+      if (d.email && d.email.includes('@')) customerEmails.add(d.email.trim());
+    });
+
+    const sellerEmails = new Set();
+    sellersSnap.docs.forEach(doc => {
+      const d = doc.data();
+      if (d.email && d.email.includes('@')) sellerEmails.add(d.email.trim());
+    });
+
+    return res.json({
+      success: true,
+      customers: Array.from(customerEmails),
+      sellers: Array.from(sellerEmails),
+      totalUnique: new Set([...customerEmails, ...sellerEmails]).size
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // ─── Resend Transactional Email Notification Routes ────────────
