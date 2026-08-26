@@ -3957,6 +3957,124 @@ Generate a polished, high-converting store announcement. Return ONLY JSON with N
   }
 });
 
+// ─── Gemini Professional Email AI Writer & Refiner Endpoint ───
+app.post('/api/ai/generate-email', async (req, res) => {
+  try {
+    const { prompt = '', tone = 'Professional & Executive', action = 'generate', currentSubject = '', currentBody = '', keyPoints = '' } = req.body || {};
+    const apiKey = process.env.GEMINI_API_KEY || '';
+    if (!apiKey) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is not configured on Render server.' });
+    }
+
+    let systemPrompt = '';
+    if (action === 'refine' && currentBody) {
+      systemPrompt = `You are a world-class executive copywriter and email strategist.
+Refine and polish the following draft email to make it more professional, engaging, clear, and high-converting:
+
+Current Subject: "${currentSubject}"
+Current Body:
+"${currentBody}"
+
+Desired Tone: ${tone}
+${keyPoints ? `Key Points to ensure included: ${keyPoints}` : ''}
+
+Instructions:
+- Keep formatting clean with professional spacing, clear paragraphs, and strategic bullet points where appropriate.
+- Retain placeholder tags like {{recipient_email}} or {{name}} if present.
+- Provide a strong, polished subject line and body.
+
+Return ONLY a JSON object without markdown code block wrappers:
+{
+  "subject": "Refined email subject line",
+  "body": "The complete polished HTML or structured plain-text email body"
+}`;
+    } else if (action === 'subject') {
+      systemPrompt = `You are an expert email marketer specializing in high open-rate subject lines.
+Based on the following email content, generate 3 compelling, click-worthy subject line options:
+
+Email Body:
+"${currentBody}"
+
+Desired Tone: ${tone}
+
+Return ONLY a JSON object without markdown code block wrappers:
+{
+  "subject": "The single best subject line",
+  "suggestions": ["Option 1", "Option 2", "Option 3"]
+}`;
+    } else {
+      systemPrompt = `You are a world-class executive copywriter and communications director.
+Create a professionally crafted bulk email based on the following user prompt and specifications:
+
+User Brief/Prompt: "${prompt.trim()}"
+Tone Style: ${tone}
+${keyPoints ? `Key Highlights/Details: ${keyPoints}` : ''}
+
+Instructions:
+- Write a compelling, highly effective email.
+- Structure it cleanly with a strong opening, well-paced body text, bullet points for key details, and a clear call-to-action (CTA).
+- You can include dynamic tag {{recipient_email}} where appropriate for personalization.
+
+Return ONLY a JSON object without markdown code block wrappers:
+{
+  "subject": "Catchy, professional email subject line",
+  "body": "The complete crafted email body text"
+}`;
+    }
+
+    const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+    let response = null;
+    let errText = '';
+
+    const payload = {
+      contents: [{ parts: [{ text: systemPrompt }] }],
+      generationConfig: {
+        temperature: 0.7,
+        response_mime_type: "application/json"
+      }
+    };
+
+    for (const model of candidateModels) {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch((fetchErr) => {
+        errText = fetchErr.message;
+        return null;
+      });
+
+      if (response && response.ok) break;
+      if (response) {
+        errText = await response.text().catch(() => '');
+        console.warn(`[Gemini Email AI] Model ${model} returned ${response.status}: ${errText}`);
+      }
+    }
+
+    if (!response || !response.ok) {
+      throw new Error(`Gemini API error (${response?.status || 500}): ${errText}`);
+    }
+
+    const geminiData = await response.json();
+    const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+
+    let parsedData = {};
+    try {
+      const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      parsedData = JSON.parse(cleanJson);
+    } catch (e) {
+      console.warn('Failed to parse Gemini Email JSON output:', e.message);
+      parsedData = { subject: 'Announcement', body: rawText };
+    }
+
+    return res.json({ success: true, data: parsedData });
+  } catch (err) {
+    console.error('❌ Gemini Email AI Error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Kwabz Personalised Shopping & Campus Life AI Assistant Endpoint ───
 app.post('/api/ai/shopping-assistant', async (req, res) => {
   try {
